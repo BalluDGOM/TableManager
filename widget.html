@@ -11,7 +11,12 @@
      
     <div class="max-w-7xl mx-auto bg-white p-6 rounded-xl shadow-md">
         <h1 class="text-2xl font-bold mb-6 text-indigo-700">🏗️ Gestionnaire des tables & colonnes GRIST</h1>
-        <p class="mb-5"><i> Permet de créer ou modifier la structure des tables beaucoup plus rapidement qu'en passant par le clic-droit ajouter une colonne</i></p>
+        <p class="mb-5"><i> Permet de créer ou modifier la structure des tables beaucoup plus rapidement qu'en passant par le clic-droit ajouter une colonne. Trois modes :</i></p>
+        <ul class="space-y-1 list-disc list-inside ml-6">
+          <li><i>Création/modification de tables via l'interface graphique, avec ajout aisé de colonnes de traçabilité et d'historique.</i> </li>
+          <li><i>Analyse du code python provenant de <b> &lt;/&gt; Vue du code</b> d'un autre document Grist, permettant de créer une table identique en un clic</i> </li>
+          <li><i>Création en un clic de deux tables pour une gestion des utilisateurs classique : Entités (qui contient des utilisateurs) et Utilisateurs</i> </li>
+        </ul>
 
         <div class="max-w-7xl mx-auto mt-6 bg-white rounded-xl shadow-md overflow-hidden">
         <button onclick="toggleHelp()" class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition">
@@ -59,6 +64,35 @@
                     <li><strong>HISTORY</strong> est la colonne à afficher aux utilisateurs (sans les données techniques), on peut modifier son nom. <strong>HISTORY_RAW</strong> contient les snapshots encodés et <b>ne doit pas être modifiée manuellement</b>.</li>
                 </ul>
             </div>
+            <div>
+                <h3 class="font-semibold text-gray-700 mb-2">📥 Importer depuis la <b>&lt;/&gt; Vue du Code</b></h3>
+                <p class="mb-2">Copier la définition d'une table d'un autre document, typiquement : </p>
+                <p class="ml-3 text-xs"><code>@grist.UserTable <br/>
+                  class Table1:<br/>
+                    Nom = grist.Text()<br/>
+                    Prenom = grist.Text()<br/>
+                  <br/>
+                    def _default_CreeLe(rec, table, value, user):<br/>
+                      return NOW()<br/>
+                    CreeLe = grist.DateTime()<br/>
+                  <br/>
+                    def _default_CreePar(rec, table, value, user):<br/>
+                      return user.Email<br/>
+                    CreePar = grist.Text()<br/>
+                </code></p>
+                <p class="mb-2">Puis cliquer sur le bouton <b>Analyser & préparer</b></p>
+                <p class="mb-2">La table trouvée et ses colonnes seront proposées à la création, de la même manière que si cela avait été fait à la main dans le formulaire</b></p>
+                <p>Si la proposition vous sied, il suffit de cliquer sur <b>Appliquer les modifications</b></p>
+            </div>
+            <div>
+                <h3 class="font-semibold text-gray-700 mb-2">👥 Ajout des tables Entites & Utilisateurs</h3>
+                <p class="mb-2">Le bouton <strong>👥 Gestion Utilisateurs</strong> déploie instantanément un écosystème complet et interconnecté basé sur deux tables :</p>
+                <ul class="space-y-1 list-disc list-inside">
+                    <li><strong>Table <code>Entites</code> :</strong> Gère une structure hiérarchique arborescente (organisations, services, etc.) grâce à un champ <code>Parent</code>. Elle calcule de manière dynamique le <code>Nom complet</code> (chemin complet), génère un lien <code>mailto:</code> groupé de tous ses membres, et décompte via des fonctions récursives le nombre d'utilisateurs actifs directs (<code>Nbre</code>) et globaux (<code>NbreTotal</code>, incluant les sous-entités). Elle embarque nativement une traçabilité complète à la création/modification.</li>
+                    <li><strong>Table <code>Utilisateurs</code> :</strong> Liste les membres avec leur courriel, rôle et statut (<code>Actif</code>). Elle embarque nativement une traçabilité complète à la création/modification et une liaison vers l'entité parente.</li>
+                </ul>
+            </div>
+            
         </div>
   
     </div>
@@ -71,11 +105,21 @@
                 <input id="newTableName" type="text" placeholder="Nom de la nouvelle table" class="bg-white border border-gray-300 rounded px-3 py-2 w-1/3 focus:outline-indigo-500">
             </div>
         </div>
+        <div class="mb-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
+            <label class="block text-sm font-semibold mb-2 text-amber-800">📥 Importer depuis la &lt;/&gt;Vue du Code :</label>
+            <div class="flex gap-4 items-start">
+                <textarea id="pythonCodeInput" rows="3" placeholder="Collez ici la classe Python complète (ex: @grist.UserTable class MaTable...)" class="bg-white border border-gray-300 rounded px-3 py-2 w-3/4 focus:outline-amber-500 font-mono text-xs"></textarea>
+                <button type="button" onclick="parseAndLoadPythonCode()" class="bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2 px-4 rounded shadow text-sm w-1/4 transition">
+                    Analyser & préparer
+                </button>
+            </div>
+        </div>
 
         <div>
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-lg font-bold text-gray-700">Colonnes de la table</h2>
                 <div class="flex gap-2 flex-wrap justify-end">
+                    
                     <button type="button" onclick="addTraceabilityColumns()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-3 rounded text-sm transition" title="Permet de mettre en place 4 colonnes CrééLe / CrééPar / ModifiéLe / ModifiéPar pour faire un suivi simple des actions">
                         ✨ Traçabilité
                     </button>
@@ -107,11 +151,15 @@
             </div>
         </div>
 
-        <div class="mt-6 flex justify-end border-t border-gray-100 pt-4">
-            <button id="saveBtn" onclick="saveStructure()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg shadow transition">
-                Appliquer les modifications
-            </button>
-        </div>
+        <div class="mt-6 flex justify-between items-center border-t border-gray-100 pt-4">
+          <button type="button" onclick="createUserManagement()" class="bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium py-1 px-3 rounded text-sm transition me-auto" title="Créer automatiquement l'écosystème de gestion des utilisateurs">
+              👥 Ajout des tables Entites & Utilisateurs 
+          </button>
+          <div id="info" class="text-xs text-green-700 pr-6"></div>
+          <button id="saveBtn" onclick="saveStructure()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg shadow transition">
+              Appliquer les modifications
+          </button>
+      </div>
     </div>
 
  
@@ -313,7 +361,200 @@
             addColumnRow('ModifiéLe', 'DateTime', 'NOW()', false, true);
             addColumnRow('ModifiéPar', 'Text', 'user.Email', false, true);
         }
+        function parseAndLoadPythonCode() {
+            const code = document.getElementById('pythonCodeInput').value.trim();
+            if (!code) {
+                alert("Veuillez coller du code Python valide.");
+                return;
+            }
 
+            // 1. Extraction du nom de la table
+            const tableClassMatch = code.match(/class\s+([a-zA-Z0-9_]+)\s*\(/) || code.match(/class\s+([a-zA-Z0-9_]+)\s*:/);
+            if (!tableClassMatch) {
+                alert("Impossible de trouver le nom de la table (déclaration 'class NomTable:').");
+                return;
+            }
+            const tableName = tableClassMatch[1];
+
+            // Forcer le sélecteur sur la création d'une nouvelle table et injecter le nom
+            document.getElementById('tableSelect').value = "__NEW__";
+            const nameInput = document.getElementById('newTableName');
+            nameInput.classList.remove('hidden');
+            nameInput.value = tableName;
+
+            const container = document.getElementById('columnsContainer');
+            container.innerHTML = '';
+
+            // Dictionnaire temporaire pour stocker les éléments découverts
+            const discoveredColumns = {};
+
+            // 2. Extraction des déclarations de colonnes standard (ex: MonChamp = grist.Text())
+            const colRegex = /([a-zA-Z0-9_]+)\s*=\s*grist\.([a-zA-Z0-9_]+)\s*\(([^)]*)\)/g;
+            let match;
+            while ((match = colRegex.exec(code)) !== null) {
+                const colId = match[1];
+                let rawType = match[2]; // Text, Numeric, Reference etc.
+                const args = match[3];
+
+                // Ajustement du type pour correspondre au sélecteur du widget
+                let type = 'Text';
+                if (rawType === 'Numeric' || rawType === 'Int' || rawType === 'Bool' || rawType === 'Date' || rawType === 'DateTime' || rawType === 'Choice') {
+                    type = rawType;
+                } else if (rawType === 'Reference') {
+                    // Conserver le type complet si c'est une Ref (ex: Ref:Metriques)
+                    const refTableMatch = args.match(/['"]([^'"]+)['"]/);
+                    const refTable = refTableMatch ? refTableMatch[1] : '';
+                    type = refTable ? `Ref:${refTable}` : 'Ref';
+                }
+
+                discoveredColumns[colId] = {
+                    label: colId,
+                    type: type,
+                    formula: '',
+                    triggerCreate: false,
+                    triggerUpdate: false
+                };
+            }
+
+            // 3. Extraction des formules standards (décorateur @grist.formulaType)
+            // Gère le cas multiligne ou condensé sur une ligne
+            const formulaRegex = /@grist\.formulaType[\s\S]*?def\s+([a-zA-Z0-9_]+)\s*\(rec,\s*table\)\s*:\s*return\s+([^\n\r]+)/g;
+            while ((match = formulaRegex.exec(code)) !== null) {
+                const colId = match[1];
+                const formulaText = match[2].trim();
+
+                if (discoveredColumns[colId]) {
+                    discoveredColumns[colId].formula = formulaText;
+                } else {
+                    // Si la formule n'avait pas sa déclaration de variable en amont
+                    discoveredColumns[colId] = {
+                        label: colId,
+                        type: 'Text',
+                        formula: formulaText,
+                        triggerCreate: false,
+                        triggerUpdate: false
+                    };
+                }
+            }
+
+            // 4. Extraction des fonctions d'initialisation (Triggers : _default_...)
+            const triggerRegex = /def\s+_default_([a-zA-Z0-9_]+)\s*\(rec,\s*table,\s*value,\s*user\)\s*:\s*return\s+([^\n\r]+)/g;
+            while ((match = triggerRegex.exec(code)) !== null) {
+                const colId = match[1];
+                const triggerFormula = match[2].trim();
+
+                if (discoveredColumns[colId]) {
+                    discoveredColumns[colId].formula = triggerFormula;
+                    
+                    // Déduction intelligente de si c'est "À la création" ou "À la modification"
+                    if (colId.includes('Modifie')) {
+                        discoveredColumns[colId].triggerUpdate = true;
+                    } else {
+                        discoveredColumns[colId].triggerCreate = true;
+                    }
+                }
+            }
+
+            // 5. Injection de toutes les colonnes parsées dans l'interface graphique
+            const keys = Object.keys(discoveredColumns);
+            if (keys.length === 0) {
+                alert("Aucune colonne n'a pu être extraite. Vérifiez la syntaxe.");
+                addColumnRow();
+                return;
+            }
+
+            keys.forEach(colId => {
+                const c = discoveredColumns[colId];
+                addColumnRow(c.label, c.type, c.formula, c.triggerCreate, c.triggerUpdate, colId, '');
+            });
+
+            updateHistoryColumnVisibility();
+            alert(`Schéma de la table "${tableName}" analysé avec succès (${keys.length} colonnes trouvées) !`);
+        }
+
+async function createUserManagement() {
+    if (!confirm("Voulez-vous créer automatiquement les tables 'Entites' et 'Utilisateurs' avec leurs relations et formules complexes ?")) return;
+
+    const saveBtn = document.getElementById('saveBtn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Génération de l'écosystème...";
+
+    try {
+        // =================================================================
+        // 1. CRÉATION DE LA TABLE 'ENTITES' (Structure initiale + Triggers)
+        // =================================================================
+        const entitesColumns = [
+            { id: 'Nom', label: 'Nom', type: 'Text', formula: '', isFormula: false, recalcWhen: 0, recalcDeps: null },
+            { id: 'Parent', label: 'Parent', type: 'Ref:Entites', formula: '', isFormula: false, recalcWhen: 0, recalcDeps: null },
+            { id: 'Nom_complet', label: 'Nom complet', type: 'Text', formula: "nom = rec.Nom\nparent = rec.Parent\nwhile parent:\n    nom = parent.Nom +\"/\"+ nom\n    parent = parent.Parent\nreturn nom", isFormula: true, recalcWhen: 0, recalcDeps: null },
+            { id: 'Mail_groupe', label: 'Mail groupe', type: 'Text', formula: "from urllib.parse import quote\npeople = Utilisateurs.lookupRecords(Entite=rec.id)\nreturn \"Courriel groupé (%s) mailto:%s\" % (len(people), quote(\", \".join(people.Email)))", isFormula: true, recalcWhen: 0, recalcDeps: null },
+            { id: 'Actif', label: 'Actif', type: 'Bool', formula: '', isFormula: false, recalcWhen: 0, recalcDeps: null },
+            { id: 'Nbre', label: 'Nbre', type: 'Numeric', formula: "return len(Utilisateurs.lookupRecords(Entite=rec.id, Actif=True))", isFormula: true, recalcWhen: 0, recalcDeps: null },
+            { id: 'NbreTotal', label: 'NbreTotal', type: 'Numeric', formula: "def somme_descendants(entite):\n    enfants = Entites.lookupRecords(Parent=entite)\n    return sum(r.Nbre for r in enfants) + sum(somme_descendants(r) for r in enfants)\n\nreturn rec.Nbre + somme_descendants(rec)", isFormula: true, recalcWhen: 0, recalcDeps: null },
+            
+            // On intègre directement la structure brute des colonnes de traçabilité
+            { id: 'CreeLe', label: 'CrééLe', type: 'DateTime' },
+            { id: 'CreePar', label: 'CrééPar', type: 'Text' },
+            { id: 'ModifieLe', label: 'ModifiéLe', type: 'DateTime' },
+            { id: 'ModifiePar', label: 'ModifiéPar', type: 'Text' }
+        ];
+        document.getElementById('info').textContent = "Ajout de la table Entites";
+        // Création de la table Entites complète en un seul appel
+        await grist.docApi.applyUserActions([['AddTable', 'Entites', entitesColumns]]);
+
+        // Configuration des formules de traçabilité pour 'Entites' en un seul lot d'actions
+        const entitesFormulasActions = [
+            ['ModifyColumn', 'Entites', 'Actif', { formula: 'True', isFormula: false, recalcWhen: 0 }],
+            ['ModifyColumn', 'Entites', 'CreeLe', { formula: 'NOW()', isFormula: false, recalcWhen: 0 }],
+            ['ModifyColumn', 'Entites', 'CreePar', { formula: 'user.Email', isFormula: false, recalcWhen: 0 }],
+            ['ModifyColumn', 'Entites', 'ModifieLe', { formula: 'NOW()', isFormula: false, recalcWhen: 2 }],
+            ['ModifyColumn', 'Entites', 'ModifiePar', { formula: 'user.Email', isFormula: false, recalcWhen: 2 }]
+        ];
+        document.getElementById('info').textContent = "Ajout des formules sur la table Entites";
+        await grist.docApi.applyUserActions(entitesFormulasActions);
+
+
+        // =================================================================
+        // 2. CRÉATION DE LA TABLE 'UTILISATEURS' (Structure initiale + Triggers)
+        // =================================================================
+        const utilisateursColumns = [
+            { id: 'Email', label: 'Email', type: 'Text', formula: '', isFormula: false, recalcWhen: 0, recalcDeps: null },
+            { id: 'Role', label: 'Role', type: 'Choice', formula: '', isFormula: false, recalcWhen: 0, recalcDeps: null },
+            { id: 'Entite', label: 'Entite', type: 'Ref:Entites', formula: '', isFormula: false, recalcWhen: 0, recalcDeps: null },
+            { id: 'Actif', label: 'Actif', type: 'Bool', formula: '', isFormula: false, recalcWhen: 0, recalcDeps: null },
+            { id: 'Moi', label: 'Moi', type: 'Bool', formula: 'return True', isFormula: true, recalcWhen: 0, recalcDeps: null },
+            
+            // Structure brute des colonnes de traçabilité
+            { id: 'CreeLe', label: 'CrééLe', type: 'DateTime' },
+            { id: 'CreePar', label: 'CrééPar', type: 'Text' },
+            { id: 'ModifieLe', label: 'ModifiéLe', type: 'DateTime' },
+            { id: 'ModifiePar', label: 'ModifiéPar', type: 'Text' }
+        ];
+        document.getElementById('info').textContent = "Ajout de la table Utilisateurs";
+        // Création de la table Utilisateurs en un seul appel
+        await grist.docApi.applyUserActions([['AddTable', 'Utilisateurs', utilisateursColumns]]);
+
+        // Configuration des formules de traçabilité pour 'Utilisateurs' en un seul lot d'actions
+        const utilisateursFormulasActions = [
+            ['ModifyColumn', 'Utilisateurs', 'Actif', { formula: 'True', isFormula: false, recalcWhen: 0 }],
+            ['ModifyColumn', 'Utilisateurs', 'CreeLe', { formula: 'NOW()', isFormula: false, recalcWhen: 0 }],
+            ['ModifyColumn', 'Utilisateurs', 'CreePar', { formula: 'user.Email', isFormula: false, recalcWhen: 0 }],
+            ['ModifyColumn', 'Utilisateurs', 'ModifieLe', { formula: 'NOW()', isFormula: false, recalcWhen: 2 }],
+            ['ModifyColumn', 'Utilisateurs', 'ModifiePar', { formula: 'user.Email', isFormula: false, recalcWhen: 2 }]
+        ];
+        document.getElementById('info').textContent = "Ajout des formules sur la table Utilisateurs";
+        await grist.docApi.applyUserActions(utilisateursFormulasActions);
+
+        alert("Succès ! L'écosystème complet de gestion des utilisateurs a été généré avec succès et sans latence.");
+        await loadTables();
+
+    } catch (err) {
+        alert("Erreur lors de l'initialisation de la gestion utilisateurs : " + err.message);
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Appliquer les modifications";
+    }
+}
         // =====================================================================
         // HISTORY FEATURE
         // =====================================================================
@@ -605,18 +846,15 @@
                 formula: c.formula,
                 isFormula: c.isFormula,
                 recalcWhen: c.recalcWhen,
-                //recalcDeps: c.recalcWhen === 2 ? [] : null,
             };
         }
 
         // Payload réduit pour ModifyColumn après AddColumn sur colonne recalcWhen=2
-        // N'envoie QUE les propriétés de trigger, pas label/type qui provoquent AssertionError
         function buildTriggerPayload(c) {
             return {
                 formula: c.formula,
                 isFormula: false,
                 recalcWhen: 2,
-               // recalcDeps: [],
             };
         }
 
@@ -679,6 +917,7 @@
         // =====================================================================
 
         async function addNewColumn(tableName, col) {
+            document.getElementById('info').textContent = "Ajout colonne " + col.label;
             // Étape 1 : créer la colonne (sans formule ni trigger)
             await grist.docApi.applyUserActions([
                 ['AddColumn', tableName, col.id, { label: col.label, type: col.type }]
@@ -687,6 +926,7 @@
 
             // Étape 2 : appliquer formule/trigger séparément si nécessaire
             if (col.formula) {
+                document.getElementById('info').textContent = "Ajout formule sur " + col.label;
                 const payload = col.recalcWhen === 2
                     ? buildTriggerPayload(col)   // payload réduit pour recalcWhen=2
                     : buildModifyPayload(col);   // payload complet pour les autres cas
@@ -812,8 +1052,8 @@
                 } else {
                     const historyCol   = processedColumns.find(c => c.id === 'HISTORY');
                     const otherColumns = processedColumns.filter(c => c.id !== 'HISTORY');
- console.log("tableOrigine" )
-                            console.log(tablesCache)
+                    console.log("tableOrigine" )
+                    console.log(tablesCache)
                     for (const col of otherColumns) {
                         if (!col.internalId) {
                             // Nouvelle colonne à ajouter
@@ -852,9 +1092,6 @@
                                 || original.formula !== historyCol.formula
                                 || original.isFormula !== historyCol.isFormula
                                 || original.recalcWhen !== historyCol.recalcWhen;
-                            console.log("changement")
-                            console.log(historyCol)
-                            console.log(hasChanged)
 
                             if (hasChanged) {
                                 await grist.docApi.applyUserActions([
