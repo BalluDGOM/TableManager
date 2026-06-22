@@ -230,7 +230,7 @@
                         if (colsData.parentId[i] === internalTableNumId
                             && colsData.colId[i] !== "manualSort"
                             && !colsData.colId[i].startsWith('gristHelper_')) {
-                            console.log(colsData)    
+                              
                             const colId = colsData.colId[i];
                             const label = colsData.label ? (colsData.label[i] || colId) : colId;
                             const type = colsData.type[i] || 'Text';
@@ -1052,8 +1052,7 @@ async function createUserManagement() {
                 } else {
                     const historyCol   = processedColumns.find(c => c.id === 'HISTORY');
                     const otherColumns = processedColumns.filter(c => c.id !== 'HISTORY');
-                    console.log("tableOrigine" )
-                    console.log(tablesCache)
+                    
                     for (const col of otherColumns) {
                         if (!col.internalId) {
                             // Nouvelle colonne à ajouter
@@ -1067,10 +1066,6 @@ async function createUserManagement() {
                                 || original.formula !== col.formula
                                 || original.isFormula !== col.isFormula
                                 || original.recalcWhen !== col.recalcWhen;
-                            console.log("changement" + col)
-                            console.log(col)
-                            console.log(hasChanged)
-
                             if (hasChanged) {
                                 await grist.docApi.applyUserActions([
                                     ['ModifyColumn', tableId, col.originalId, buildModifyPayload(col)]
@@ -1101,7 +1096,7 @@ async function createUserManagement() {
                         }
                     }
 
-                    alert(`La table "${tableId}" a été mise à jour.`);
+                    alert(`La table "${tableId}" a été mise à jour. Pensez à rendre visibiles les colonnes créées dans vos vues !`);
                 }
 
                 await loadTables();
