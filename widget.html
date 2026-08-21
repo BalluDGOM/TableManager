@@ -52,6 +52,13 @@
     overflow: auto; white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12.5px; line-height: 1.5; max-height: calc(100vh - 160px);
   }
+  .top-bars-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap; /* Permet un retour à la ligne propre si l'écran est trop étroit */
+  }
   .toolbar { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
   .toolbar-check {
     display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
@@ -107,11 +114,11 @@
   .dg-rel-path:hover { opacity: 1; stroke-width: 2.4; }
   .zoom-controls { display: flex; gap: 6px; }
   .zoom-controls button { width: 30px; padding: 5px 0; }
-  #hiddenBar {
+  #hiddenBar, #usageHiddenBar {
     display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
     padding: 8px 10px; margin-bottom: 10px; background: var(--warn-bg); border-radius: 8px;
   }
-  #hiddenBar .hb-label { color: var(--warn-fg); font-size: 12px; font-weight: 600; margin-right: 2px; }
+  #hiddenBar .hb-label, #usageHiddenBar .hb-label,{ color: var(--warn-fg); font-size: 12px; font-weight: 600; margin-right: 2px; }
   .hb-chip {
     display: inline-flex; align-items: center; gap: 5px;
     background: #fff; border: 1px solid var(--border); border-radius: 12px;
@@ -238,27 +245,39 @@
   <main>
     <div id="statusBox"></div>
     <div id="panel-diagram">
-      <div class="toolbar">
-        <button id="btnFit">⤢ Ajuster à l'écran</button>
-        <div class="zoom-controls">
-          <button id="btnZoomOut">−</button>
-          <button id="btnZoomIn">+</button>
+      <div id="help-diagram" class="status hidden relative pr-20" style="margin-bottom:12px;">
+        <button onclick="toggleHelpDiagram()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-700">
+          <span class="text-sm font-semibold">x</span>
+        </button> 
+        <p>📁 Vue » permet d'enregistrer plusieurs dispositions nommées (ex. « Métier », « Support », « Administration ») — chacune capture les éléments masqués, les positions déplacées et, pour le diagramme de schéma, l'affichage des colonnes non liées ; tout est stocké dans les options du widget. 
+        </p>
+      </div>
+      <div class="top-bars-container">
+        <div class="toolbar">
+          <button onclick="toggleHelpDiagram()" class="zoom-controls">
+                <span>❓</span>
+          </button>
+          <button id="btnFit">⤢ Ajuster à l'écran</button>
+          <div class="zoom-controls">
+            <button id="btnZoomOut">−</button>
+            <button id="btnZoomIn">+</button>
+          </div>
+          <button id="btnDownloadSvg">⬇ Télécharger .svg</button>
+          <button id="btnResetLayout">↺ Réinitialiser la disposition</button>
+          <button id="btnHideAll">🙈 Tout masquer</button>
+          <label class="toolbar-check">
+            <input type="checkbox" id="chkShowUnlinkedColumns" checked>
+            Afficher les colonnes sans lien avec une autre table
+          </label>
         </div>
-        <button id="btnDownloadSvg">⬇ Télécharger .svg</button>
-        <button id="btnResetLayout">↺ Réinitialiser la disposition</button>
-        <button id="btnHideAll">🙈 Tout masquer</button>
-        <label class="toolbar-check">
-          <input type="checkbox" id="chkShowUnlinkedColumns" checked>
-          Afficher les colonnes sans lien avec une autre table
-        </label>
+        <div class="version-bar">
+          <span class="version-bar-label">📁 Vue :</span>
+          <select id="diagramVersionSelect"></select>
+          <button id="btnDiagramSaveVersion">💾 Enregistrer sous…</button>
+          <button id="btnDiagramDeleteVersion" disabled>🗑 Supprimer</button>
+        </div>
       </div>
-      <div class="version-bar">
-        <span class="version-bar-label">📁 Vue :</span>
-        <select id="diagramVersionSelect"></select>
-        <button id="btnDiagramSaveVersion">💾 Enregistrer sous…</button>
-        <button id="btnDiagramDeleteVersion" disabled>🗑 Supprimer</button>
-      </div>
-      <div id="hiddenBar" style="display:none;"></div>
+      <div id="hiddenBar" class="hidden"></div>
       <div id="diagramWrap">
         <svg id="diagramSvg" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -271,30 +290,42 @@
       </div>
     </div>
     <div id="panel-usage" style="display:none;">
-      <div class="status" style="margin-bottom:12px;">
-        Colonne de gauche : les <strong>pages</strong> du document (organisées selon la même hiérarchie que le
+      <div id="help-usage" class="status hidden relative pr-20" style="margin-bottom:12px;">
+        <button onclick="toggleHelpUsage()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-700">
+          <span class="text-sm font-semibold">x</span>
+        </button> 
+        <p>Colonne de gauche : les <strong>pages</strong> du document (organisées selon la même hiérarchie que le
         panneau de pages de Grist, d'après <code class="inline">_grist_Pages</code>) et les widgets (vues)
         qu'elles contiennent — les traits en pointillés gris relient une page à ses sous-pages.
         Colonne de droite : les <strong>tables sources</strong> du document. Chaque trait coloré relie un
-        widget à la table qu'il affiche (<code class="inline">tableRef</code> de la section).
+        widget à la table qu'il affiche (<code class="inline">tableRef</code> de la section).</p>
+
+        <p>📁 Vue » permet d'enregistrer plusieurs dispositions nommées (ex. « Métier », « Support », « Administration ») — chacune capture les éléments masqués, les positions déplacées et, pour le diagramme de schéma, l'affichage des colonnes non liées ; tout est stocké dans les options du widget. 
+        </p>
       </div>
-      <div class="toolbar">
-        <button id="btnUsageFit">⤢ Ajuster à l'écran</button>
-        <div class="zoom-controls">
-          <button id="btnUsageZoomOut">−</button>
-          <button id="btnUsageZoomIn">+</button>
+      <div class="top-bars-container">
+        <div class="toolbar">
+          <button onclick="toggleHelpUsage()" class="zoom-controls">
+                <span>❓</span>
+          </button>
+          <button id="btnUsageFit">⤢ Ajuster à l'écran</button>
+          <div class="zoom-controls">
+            <button id="btnUsageZoomOut">−</button>
+            <button id="btnUsageZoomIn">+</button>
+          </div>
+          <button id="btnUsageDownloadSvg">⬇ Télécharger .svg</button>
+          <button id="btnUsageResetLayout">↺ Réinitialiser la disposition</button>
+          <button id="btnUsageHideAll">🙈 Tout masquer</button>
+          
         </div>
-        <button id="btnUsageDownloadSvg">⬇ Télécharger .svg</button>
-        <button id="btnUsageResetLayout">↺ Réinitialiser la disposition</button>
-        <button id="btnUsageHideAll">🙈 Tout masquer</button>
+        <div class="version-bar">
+          <span class="version-bar-label">📁 Vue :</span>
+          <select id="usageVersionSelect"></select>
+          <button id="btnUsageSaveVersion">💾 Enregistrer sous…</button>
+          <button id="btnUsageDeleteVersion" disabled>🗑 Supprimer</button>
+        </div>
       </div>
-      <div class="version-bar">
-        <span class="version-bar-label">📁 Vue :</span>
-        <select id="usageVersionSelect"></select>
-        <button id="btnUsageSaveVersion">💾 Enregistrer sous…</button>
-        <button id="btnUsageDeleteVersion" disabled>🗑 Supprimer</button>
-      </div>
-      <div id="usageHiddenBar" style="display:none;"></div>
+      <div id="usageHiddenBar" class="hidden"></div>
       <div id="usageWrap">
         <svg id="usageSvg" xmlns="http://www.w3.org/2000/svg">
           <defs></defs>
@@ -313,8 +344,12 @@
       <div id="widgetsList"><div class="empty">Chargement…</div></div>
     </div>
     <div id="panel-builder" style="display:none;">
+       
       <div class="status" style="margin-bottom:12px;">
-        Cet onglet liste toutes les vues qui utilisent un widget personnalisé « code », de deux types :
+        <i>Cet onglet tente de télécharger le code source de chaque widget — qu'il soit écrit dans le « Custom widget builder » ou
+    ajouté via une URL externe — pour y détecter les tables et colonnes utilisées ; seule l'URL du widget elle-même est téléchargée (pas les scripts tiers qu'elle charge, ex. dépendances ou CDN), et cela échoue
+    silencieusement si le site qui héberge le widget bloque les requêtes inter-domaines (CORS).</i><br/>
+        Sont listées toutes les vues qui utilisent un widget personnalisé « code », de deux types :
         <span class="kind-badge builder">🧱 Builder</span> les widgets écrits dans le
         <strong>« Custom widget builder »</strong> intégré (<code class="inline">widgetDef.name === "Custom widget builder"</code>,
         code lu dans <code class="inline">widgetOptions</code>) et
@@ -327,14 +362,7 @@
     </div>
   </main>
   <footer class="note">
-    L'onglet « Custom widgets » tente de télécharger le code source de chaque widget — qu'il soit écrit dans le « Custom widget builder » ou
-    ajouté via une URL externe — pour y détecter les tables et colonnes utilisées ; seule l'URL du widget
-    elle-même est téléchargée (pas les scripts tiers qu'elle charge, ex. dépendances ou CDN), et cela échoue
-    silencieusement si le site qui héberge le widget bloque les requêtes inter-domaines (CORS).
-    Sur les onglets « Diagramme » et « Pages ↔ Données », le bandeau « 📁 Vue » permet d'enregistrer
-    plusieurs dispositions nommées (ex. « Métier », « Support », « Administration ») — chacune capture les
-    éléments masqués, les positions déplacées et, pour le diagramme de schéma, l'affichage des colonnes
-    non liées ; tout est stocké dans les options du widget.
+   
   </footer>
 </div>
 
@@ -1222,11 +1250,11 @@ function updateHiddenBar() {
     return;
   }
   bar.style.display = 'flex';
-  bar.innerHTML = '<span class="hb-label">🙈 Tables masquées :</span>' +
+  bar.innerHTML = '<button onclick="toggleHiddenBar()" class="top-2 right-2 text-gray-500 hover:text-gray-700"><span class="hb-label inline-flex">🙈 Tables masquées :<svg id="hiddenbar-chevron" class="w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg></span></button> <span id="hiddenbar-content">' +
     hiddenList.map(id =>
       '<span class="hb-chip">' + escapeHtml(id) + '<button data-restore="' + escapeHtml(id) + '" title="Réafficher">✕</button></span>'
     ).join('') +
-    '<button id="btnShowAll" style="margin-left:6px;">Tout réafficher</button>';
+    '<button id="btnShowAll" style="margin-left:6px;">Tout réafficher</button></span>';
 
   bar.querySelectorAll('[data-restore]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1595,11 +1623,11 @@ function updateUsageHiddenBar(model) {
   }
 
   bar.style.display = 'flex';
-  bar.innerHTML = '<span class="hb-label">🙈 Éléments masqués :</span>' +
+  bar.innerHTML = '<button onclick="toggleHiddenBarUsage()" class="top-2 right-2 text-gray-500 hover:text-gray-700"><span class="hb-label inline-flex">🙈 Éléments masqués :<svg id="hiddenbar-usage-chevron" class="w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg></span></button> <span id="hiddenbar-usage-content">'  +
     hiddenList.map(x =>
       '<span class="hb-chip">' + escapeHtml(x.label) + '<button data-restore="' + escapeHtml(x.id) + '" title="Réafficher">✕</button></span>'
     ).join('') +
-    '<button id="btnUsageShowAll" style="margin-left:6px;">Tout réafficher</button>';
+    '<button id="btnUsageShowAll" style="margin-left:6px;">Tout réafficher</button></span>';
 
   bar.querySelectorAll('[data-restore]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2218,6 +2246,62 @@ document.getElementById('btnDownload').addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
+
+document.getElementById('btnDownloadSvg').addEventListener('click', () => {
+  const svg = document.getElementById('diagramSvg');
+  
+  // 1. Cloner le SVG pour ne pas altérer le DOM interactif
+  const clone = svg.cloneNode(true);
+
+  // 2. Supprimer les éléments d'interface inutiles à l'export (boutons de masquage)
+  clone.querySelectorAll('.dg-hide-btn').forEach(btn => btn.remove());
+
+  // 3. Récupérer et injecter les règles CSS appliquées à vos classes SVG
+  const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+  styleEl.textContent = `
+    /* Définition des couleurs de repli si var(--accent) n'est pas résolu */
+    :root { --accent: #3b82f6; }
+    
+    /* Styles généraux */
+    text { font-family: system-ui, -apple-system, sans-serif; }
+    
+    /* Styles des boîtes et headers */
+    .dg-table-box .dg-body { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1px; }
+    .dg-table-box .dg-header { fill: #1f2937; }
+    .dg-title { fill: #ffffff; font-size: 13px; font-weight: 600; }
+    .dg-col { fill: #374151; font-size: 12px; }
+    .dg-col-type, .ug-source-label { fill: #9ca3af; font-style: italic; }
+    
+    /* Styles des liens */
+    .dg-rel-path { fill: none; stroke-width: 2px; }
+    .ug-tree-link { fill: none; stroke: #9ca3af; stroke-width: 1.5px; stroke-dasharray: 4 4; }
+  `;
+  clone.insertBefore(styleEl, clone.firstChild);
+
+  // 4. Garantir les attributs XML et dimensions
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  if (!clone.getAttribute('viewBox')) {
+    const w = clone.getAttribute('width') || 800;
+    const h = clone.getAttribute('height') || 600;
+    clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  }
+
+  // 5. Sérialisation et téléchargement
+  const serializer = new XMLSerializer();
+  const source = '<?xml version="1.0" encoding="utf-8"?>\n' + serializer.serializeToString(clone);
+  
+  const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'pages-donnees.svg';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+/*
 document.getElementById('btnDownloadSvg').addEventListener('click', () => {
   const svg = document.getElementById('diagramSvg');
   const serializer = new XMLSerializer();
@@ -2232,7 +2316,7 @@ document.getElementById('btnDownloadSvg').addEventListener('click', () => {
   a.download = 'diagramme-schema.svg';
   a.click();
   URL.revokeObjectURL(url);
-});
+});*/
 
 document.getElementById('btnResetLayout').addEventListener('click', () => {
   manualPositions = {};
@@ -2297,6 +2381,61 @@ document.getElementById('btnDiagramDeleteVersion').addEventListener('click', () 
 
 document.getElementById('btnUsageDownloadSvg').addEventListener('click', () => {
   const svg = document.getElementById('usageSvg');
+  
+  // 1. Cloner le SVG pour ne pas altérer le DOM interactif
+  const clone = svg.cloneNode(true);
+
+  // 2. Supprimer les éléments d'interface inutiles à l'export (boutons de masquage)
+  clone.querySelectorAll('.dg-hide-btn').forEach(btn => btn.remove());
+
+  // 3. Récupérer et injecter les règles CSS appliquées à vos classes SVG
+  const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+  styleEl.textContent = `
+    /* Définition des couleurs de repli si var(--accent) n'est pas résolu */
+    :root { --accent: #3b82f6; }
+    
+    /* Styles généraux */
+    text { font-family: system-ui, -apple-system, sans-serif; }
+    
+    /* Styles des boîtes et headers */
+    .dg-table-box .dg-body { fill: #ffffff; stroke: #e5e7eb; stroke-width: 1px; }
+    .dg-table-box .dg-header { fill: #1f2937; }
+    .dg-title { fill: #ffffff; font-size: 13px; font-weight: 600; }
+    .dg-col { fill: #374151; font-size: 12px; }
+    .dg-col-type, .ug-source-label { fill: #9ca3af; font-style: italic; }
+    
+    /* Styles des liens */
+    .dg-rel-path { fill: none; stroke-width: 2px; }
+    .ug-tree-link { fill: none; stroke: #9ca3af; stroke-width: 1.5px; stroke-dasharray: 4 4; }
+  `;
+  clone.insertBefore(styleEl, clone.firstChild);
+
+  // 4. Garantir les attributs XML et dimensions
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  if (!clone.getAttribute('viewBox')) {
+    const w = clone.getAttribute('width') || 800;
+    const h = clone.getAttribute('height') || 600;
+    clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  }
+
+  // 5. Sérialisation et téléchargement
+  const serializer = new XMLSerializer();
+  const source = '<?xml version="1.0" encoding="utf-8"?>\n' + serializer.serializeToString(clone);
+  
+  const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'pages-donnees.svg';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+/*
+
+document.getElementById('btnUsageDownloadSvg').addEventListener('click', () => {
+  const svg = document.getElementById('usageSvg');
   const serializer = new XMLSerializer();
   let source = serializer.serializeToString(svg);
   if (!source.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)) {
@@ -2309,7 +2448,7 @@ document.getElementById('btnUsageDownloadSvg').addEventListener('click', () => {
   a.download = 'pages-donnees.svg';
   a.click();
   URL.revokeObjectURL(url);
-});
+});*/
 
 document.getElementById('btnUsageResetLayout').addEventListener('click', () => {
   usageManualPositions = {};
@@ -2377,6 +2516,27 @@ Promise.all([loadDiagramState(), loadUsageState()]).then(() => {
   loadAll();
 });
 
+function toggleHiddenBar() {
+            const el = document.getElementById('hiddenbar-content');
+            const chevron = document.getElementById('hiddenbar-chevron');
+            el.classList.toggle('hidden');
+            chevron.style.transform = el.classList.contains('hidden') ? '' : 'rotate(180deg)';
+        }
+function toggleHiddenBarUsage() {
+            const el = document.getElementById('hiddenbar-usage-content');
+            const chevron = document.getElementById('hiddenbar-usage-chevron');
+            el.classList.toggle('hidden');
+            chevron.style.transform = el.classList.contains('hidden') ? '' : 'rotate(180deg)';
+        }
+function toggleHelpDiagram() {
+            const el = document.getElementById('help-diagram');
+            el.classList.toggle('hidden');
+        }
+function toggleHelpUsage() {
+            const el = document.getElementById('help-usage');
+            el.classList.toggle('hidden');
+            console.log("coucou2")
+        }
 
 // =====================================================================
 // 🏗️ Gestionnaire des tables & colonnes GRIST
