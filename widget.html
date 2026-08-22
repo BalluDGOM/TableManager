@@ -3,9 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Boîte à outils Grist</title>
+<title>Boîte à outils Grist DEV</title>
 <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/acorn/8.11.3/acorn.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/acorn-walk/8.3.2/walk.min.js"></script>
 <style>
   :root {
     --bg: #ffffff;
@@ -190,7 +192,7 @@
 <body>
   <div id="home">
     <div class="home-inner">
-      <h1>🧰 Boîte à outils Grist</h1>
+      <h1>🧰 Boîte à outils Grist DEV</h1>
       <div class="home-buttons">
         <button type="button" id="btnOpenExplorer" class="home-btn explorer">
           <span class="home-btn-icon">🔎 <span class="home-btn-title">Explorateur de schéma &amp; widgets</span></span>
@@ -346,9 +348,7 @@
     <div id="panel-builder" style="display:none;">
        
       <div class="status" style="margin-bottom:12px;">
-        <i>Cet onglet tente de télécharger le code source de chaque widget — qu'il soit écrit dans le « Custom widget builder » ou
-    ajouté via une URL externe — pour y détecter les tables et colonnes utilisées ; seule l'URL du widget elle-même est téléchargée (pas les scripts tiers qu'elle charge, ex. dépendances ou CDN), et cela échoue
-    silencieusement si le site qui héberge le widget bloque les requêtes inter-domaines (CORS).</i><br/>
+        <i>Cet onglet tente de télécharger le code source de chaque widget — qu'il soit écrit dans le « Custom widget builder » ou ajouté via une URL externe — pour y détecter les tables et colonnes utilisées ; seule l'URL du widget elle-même est téléchargée (pas les scripts tiers qu'elle charge, ex. dépendances ou CDN), et cela échoue silencieusement si le site qui héberge le widget bloque les requêtes inter-domaines (CORS).</i><br/><br/>
         Sont listées toutes les vues qui utilisent un widget personnalisé « code », de deux types :
         <span class="kind-badge builder">🧱 Builder</span> les widgets écrits dans le
         <strong>« Custom widget builder »</strong> intégré (<code class="inline">widgetDef.name === "Custom widget builder"</code>,
@@ -357,6 +357,8 @@
         (<code class="inline">customView.mode === "url"</code>) : dans ce cas le code source est téléchargé depuis
         <code class="inline">customView.url</code> et analysé à distance. Dans les deux cas, on y repère les appels à
         <code class="inline">grist.docApi.fetchTable(...)</code> et les colonnes utilisées.
+        <br/><br/>
+        <b>Le système tente de détecter les colonnes utilisées mais les possibilités de codage étant multiples, il n'y a pas de garantie de lister toutes les colonnes utilisées !</b>
       </div>
       <div id="builderList"><div class="empty">Chargement…</div></div>
     </div>
@@ -1667,7 +1669,6 @@ async function fetchWidgetSource(url) {
   return await fetchTextSafe(url);
 }
 
-// Analyse statique (heuristique) du code source d'un widget. Voir extractTableUsageFromCode ci-dessous
 // pour le détail : recherche des appels grist.docApi.fetchTable(...) et grist.onRecords(...).
 
 async function buildWidgetsList(sections, sectionFields, columns, tables, views, onProgress) {
@@ -1736,18 +1737,6 @@ async function buildWidgetsList(sections, sectionFields, columns, tables, views,
         }))
       : [];
 
-    // Analyse du code source du widget : tables/colonnes utilisées via grist.docApi.fetchTable(...)
-    // ou via grist.onRecords(...) (dans ce cas la table vient du tableRef ci-dessus, pas du code).
-    let codeAnalysis = { status: 'no-url', tables: [] };
-    if (widgetUrl) {
-      const source = await fetchWidgetSource(widgetUrl);
-      if (source == null) {
-        codeAnalysis = { status: 'fetch-failed', tables: [] };
-      } else {
-        codeAnalysis = { status: 'ok', tables: extractTableUsageFromCode(source, tables, columnsByTableRef, tableById[s.tableRef] || null) };
-      }
-    }
-
     done++;
     if (onProgress) onProgress(done, customSections.length);
 
@@ -1762,7 +1751,6 @@ async function buildWidgetsList(sections, sectionFields, columns, tables, views,
       mappedColumns,
       optionsList,
       optionsError,
-      codeAnalysis,
     };
   }));
 
@@ -1789,31 +1777,7 @@ function renderWidgets(widgets) {
           (m.resolved.length ? escapeHtml(m.resolved.join(', ')) : '<em>non liée</em>') + '</span>'
         ).join('') + '</div>';
     }
-
-    // Tables/colonnes détectées dans le code source (via fetchTable)
-    let codeHtml = '<div class="section-label">Tables utilisées dans le code (via <code class="inline">fetchTable</code>)</div>';
-    if (w.codeAnalysis.status === 'no-url') {
-      codeHtml += '<div class="empty" style="padding:6px 0;">Pas d\'URL de widget connue, analyse impossible.</div>';
-    } else if (w.codeAnalysis.status === 'fetch-failed') {
-      codeHtml += '<div class="empty" style="padding:6px 0;">Code source inaccessible depuis ce navigateur ' +
-        '(CORS, hors-ligne, ou URL invalide).</div>';
-    } else if (!w.codeAnalysis.tables.length) {
-      codeHtml += '<div class="empty" style="padding:6px 0;">Aucun appel <code class="inline">fetchTable(...)</code> détecté dans le code.</div>';
-    } else {
-      codeHtml += w.codeAnalysis.tables.map(t => {
-        const badge = t.known
-          ? '<span class="badge">' + escapeHtml(t.tableId) + '</span>'
-          : '<span class="badge" style="background:#fdecea;color:#b3261e;">' + escapeHtml(t.tableId) + ' (table inconnue)</span>';
-        const colsHtml = t.columns.length
-          ? '<div class="chips" style="margin:4px 0 8px;">' +
-            t.columns.map(c => '<span class="chip">' + escapeHtml(c) + '</span>').join('') + '</div>'
-          : '<div class="empty" style="padding:2px 0 8px; text-align:left;">Aucune colonne identifiée dans le code.</div>';
-        return '<div style="margin-bottom:2px;">' + badge + colsHtml + '</div>';
-      }).join('');
-      codeHtml += '<div style="color:var(--muted); font-size:11px; margin-top:2px;">' +
-        'Analyse heuristique (recherche textuelle) : peut manquer des usages dynamiques ou inclure de faux positifs.</div>';
-    }
-
+    
     // Liste brute des options du widget
     let optionsHtml = '';
     if (w.optionsList.length) {
@@ -1839,7 +1803,6 @@ function renderWidgets(widgets) {
         : '<div class="empty" style="padding:2px 0 8px; text-align:left;">widgetUrl inconnu (options non lisibles ou absentes)</div>') +
       chips(w.fieldColumns, 'Colonnes affichées dans la vue') +
       mappingHtml +
-      codeHtml +
       optionsHtml +
       errorHtml +
       '</div>';
@@ -1938,73 +1901,6 @@ function extractOnRecordsRowVars(code) {
   return rowVars;
 }
 
-// Analyse le code : repère les variables assignées via grist.docApi.fetchTable("Table"),
-// puis cherche dans le code les accès varName.colId ou varName['colId'] pour chaque colonne
-// connue de cette table. Retombe sur une recherche par mot entier si aucune variable n'est repérable.
-// `linkedTableId` (optionnel) est le tableId de la table à laquelle le widget est relié (tableRef de la
-// section) : utilisé pour rattacher les accès trouvés via grist.onRecords(...), qui ne nomme jamais la
-// table explicitement dans le code.
-function extractTableUsageFromCode(code, tables, columnsByTableRef, linkedTableId) {
-  if (!code) return [];
-  const tableByTableId = {};
-  tables.forEach(t => { tableByTableId[t.tableId] = t; });
-
-  const assignRe = /(?:(?:let|const|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:await\s+)?grist\.docApi\.fetchTable\s*\(\s*(['"`])([^'"`]+)\2\s*\)/g;
-  const varToTable = [];
-  let m;
-  while ((m = assignRe.exec(code))) {
-    varToTable.push({ varName: m[1], tableId: m[3] });
-  }
-
-  const bareRe = /fetchTable\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g;
-  const tableIds = new Set(varToTable.map(v => v.tableId));
-  while ((m = bareRe.exec(code))) tableIds.add(m[2]);
-
-  // Cas grist.onRecords(...) : la table n'est pas nommée dans le code, elle vient du tableRef du widget.
-  if (linkedTableId && tableByTableId[linkedTableId]) {
-    const onRecordsRowVars = extractOnRecordsRowVars(code);
-    if (onRecordsRowVars.size) {
-      tableIds.add(linkedTableId);
-      onRecordsRowVars.forEach(varName => varToTable.push({ varName, tableId: linkedTableId }));
-    }
-  }
-
-  return [...tableIds].sort().map(tableId => {
-    const t = tableByTableId[tableId];
-    if (!t) return { tableId, known: false, columns: [] };
-
-    const knownCols = (columnsByTableRef[t.id] || [])
-      .filter(c => c.colId !== 'manualSort' && !String(c.colId).startsWith('gristHelper_'))
-      .map(c => c.colId);
-    const varNames = varToTable.filter(v => v.tableId === tableId).map(v => v.varName);
-    const usedCols = new Set();
-
-    const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    if (varNames.length) {
-      varNames.forEach(varName => {
-        const escVar = escapeRe(varName);
-        knownCols.forEach(colId => {
-          const escCol = escapeRe(colId);
-          const re = new RegExp(
-            escVar + '\\s*(?:\\.\\s*' + escCol + '\\b|\\[\\s*[\'"`]' + escCol + '[\'"`]\\s*\\])'
-          );
-          if (re.test(code)) usedCols.add(colId);
-        });
-      });
-    } else {
-      // Pas de variable clairement identifiée (appel en chaîne, destructuration…) :
-      // repli sur une recherche du nom de colonne comme mot entier dans tout le code.
-      knownCols.forEach(colId => {
-        const escCol = escapeRe(colId);
-        const wordRe = new RegExp('(?<![A-Za-z0-9_$])' + escCol + '(?![A-Za-z0-9_$])');
-        if (wordRe.test(code)) usedCols.add(colId);
-      });
-    }
-
-    return { tableId, known: true, columns: [...usedCols] };
-  });
-}
 
 // Classe une section "custom" selon la manière dont son code est disponible :
 // - 'builder' : écrit dans le Custom widget builder intégré (code dans customView.widgetOptions)
@@ -2061,7 +1957,8 @@ async function buildBuilderWidgetsList(sections, tables, columns, views, onProgr
     if (classification.kind === 'builder') {
       const code = getWidgetBuilderCode(classification.customView);
       if (!code) return finish(null);
-      const tablesUsed = extractTableUsageFromCode(code, tables, columnsByTableRef, base.table);
+      const tablesUsed = extractGristTablesAndColumns(code, base.table)
+      //console.log("tablesUsed", tablesUsed)
       return finish({ ...base, kind: 'builder', hasCode: true, tablesUsed });
     }
 
@@ -2071,11 +1968,319 @@ async function buildBuilderWidgetsList(sections, tables, columns, views, onProgr
     if (source == null) {
       return finish({ ...base, kind: 'url', url, fetchFailed: true, tablesUsed: [] });
     }
-    const tablesUsed = extractTableUsageFromCode(source, tables, columnsByTableRef, base.table);
+    const tablesUsed = extractGristTablesAndColumns(source, base.table)
+    //console.log("tablesUsed", tablesUsed)
     return finish({ ...base, kind: 'url', url, fetchFailed: false, tablesUsed });
   }));
 
   return results.filter(Boolean).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+/**
+ * Analyse le code source (HTML brut ou JSON {_js, _html}) pour extraire
+ * les tables et colonnes Grist utilisées via l'AST (Acorn), plutôt que par de simples
+ * expressions régulières : on suit précisément les variables assignées depuis
+ * grist.docApi.fetchTable("Table") (y compris via de simples alias), et les accès
+ * "varName.colonne" / "varName['colonne']" qui en découlent, en excluant les propriétés
+ * JS usuelles (méthodes de tableau, propriétés DOM…) pour limiter les faux positifs.
+ *
+ * @param {string|Object} inputSource - Le code source sous forme de chaîne (HTML ou JSON) ou d'objet.
+ * @param {string|null} [linkedTableId] - tableId de la table à laquelle le widget est relié (tableRef
+ *   de la section), utilisé pour rattacher les colonnes lues via grist.onRecords(...)/onRecord(...),
+ *   qui ne nomme jamais explicitement de table dans le code.
+ * @returns {Array<Object>} Liste d'objets { tableId, known: true, columns: [...] }
+ */
+function extractGristTablesAndColumns(inputSource, linkedTableId) {
+  const JS_BUILTIN_PROPS = new Set([
+    'map', 'filter', 'forEach', 'find', 'findIndex', 'some', 'every', 'reduce',
+    'reduceRight', 'includes', 'indexOf', 'lastIndexOf', 'push', 'pop', 'shift',
+    'unshift', 'slice', 'splice', 'concat', 'join', 'flat', 'flatMap', 'sort',
+    'reverse', 'keys', 'values', 'entries', 'length', 'toString', 'valueOf',
+    // Ajouts : autres propriétés/méthodes JS et DOM usuelles, source classique de faux positifs
+    // quand une variable de page/DOM porte le même nom qu'une variable de table.
+    'then', 'catch', 'finally', 'call', 'apply', 'bind', 'hasOwnProperty',
+    'constructor', 'prototype', 'name', 'message', 'stack',
+    'style', 'classList', 'dataset', 'innerHTML', 'innerText', 'textContent',
+    'value', 'checked', 'disabled', 'children', 'parentNode', 'parentElement',
+    'addEventListener', 'removeEventListener', 'querySelector', 'querySelectorAll',
+    'getAttribute', 'setAttribute', 'removeAttribute', 'appendChild', 'removeChild',
+    'closest', 'target', 'currentTarget', 'preventDefault', 'stopPropagation',
+    'remove', 'click', 'focus', 'blur', 'matches', 'contains',
+    'log', 'warn', 'error', 'parse', 'stringify', 'assign', 'freeze', 'isArray',
+    'id',
+  ]);
+
+  // Résout paresseusement les globales Acorn / Acorn-walk, quel que soit le nom exact sous lequel
+  // le build UMD chargé les expose (selon les versions/CDN : acorn.walk, window.walk, etc.).
+  function resolveAcorn() {
+    const g = (typeof window !== 'undefined') ? window : globalThis;
+    const acornLib = g.acorn || (typeof acorn !== 'undefined' ? acorn : null);
+    const walkLib = (acornLib && acornLib.walk) || g.acornWalk || g.walk ||
+      (typeof acornWalk !== 'undefined' ? acornWalk : null);
+    return { acornLib, walkLib };
+  }
+
+  // --- Normalise l'entrée en un ou plusieurs blocs de code JS à analyser ------------------------
+  function extractJsBlocksFromSource(source) {
+    const blocks = [];
+
+    function addFromHtml(html) {
+      if (typeof html !== 'string' || !html.trim()) return;
+      const scriptRe = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+      let m;
+      let found = false;
+      while ((m = scriptRe.exec(html))) {
+        const attrs = m[1] || '';
+        if (/\bsrc\s*=/i.test(attrs)) continue; // script externe, rien à lire ici
+        const typeMatch = attrs.match(/type\s*=\s*["']([^"']*)["']/i);
+        if (typeMatch && typeMatch[1] && !/javascript|module/i.test(typeMatch[1])) continue;
+        const content = m[2];
+        if (content && content.trim()) { blocks.push(content); found = true; }
+      }
+      if (!found) {
+        // Pas de balise <script> repérable : peut-être du JS "nu" (widget servi en .js direct).
+        blocks.push(html);
+      }
+    }
+
+    let obj = null;
+    if (source && typeof source === 'object') {
+      obj = source;
+    } else if (typeof source === 'string') {
+      const trimmed = source.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try { obj = JSON.parse(trimmed); } catch (e) { obj = null; }
+      }
+    }
+
+    if (obj && typeof obj === 'object') {
+      if (typeof obj._js === 'string' && obj._js.trim()) blocks.push(obj._js);
+      if (typeof obj._html === 'string' && obj._html.trim()) addFromHtml(obj._html);
+      if (!blocks.length) {
+        // Repli : le code n'est peut-être pas sous _js/_html mais ailleurs dans l'objet.
+        Object.values(obj).forEach(v => {
+          if (typeof v === 'string' && v.length > 20) addFromHtml(v);
+        });
+      }
+    } else if (typeof source === 'string' && source.trim()) {
+      addFromHtml(source);
+    }
+
+    return blocks;
+  }
+
+  // Ramène une expression à l'identifiant "de base" dont elle dérive : records -> "records",
+  // records.filter(...) -> "records", records.map(fn)[0] -> "records", etc.
+  function unwrapToIdentifierBase(expr) {
+    let cur = expr;
+    while (cur) {
+      if (cur.type === 'Identifier') return cur.name;
+      if (cur.type === 'CallExpression') { cur = cur.callee; continue; }
+      if (cur.type === 'MemberExpression') { cur = cur.object; continue; }
+      if (cur.type === 'AwaitExpression' || cur.type === 'ChainExpression') { cur = cur.argument || cur.expression; continue; }
+      return null;
+    }
+    return null;
+  }
+
+  // Repère, via l'AST, les variables qui désignent une "ligne" reçue par grist.onRecords(...)/onRecord(...) :
+  // paramètre du callback, alias directs ("actifs = records"), variables de boucle for..of, et premier
+  // paramètre des callbacks .map/.forEach/.filter/.find/.some/.every appelés sur ces variables.
+  function extractOnRecordsRowVarsFromAst(ast, walkLib) {
+    const rowVars = new Set();
+    const paramVars = new Set();
+
+    walkLib.simple(ast, {
+      CallExpression(node) {
+        const callee = node.callee;
+        if (callee.type !== 'MemberExpression') return;
+        const prop = callee.property;
+        if (!prop || prop.type !== 'Identifier') return;
+        if (prop.name !== 'onRecords' && prop.name !== 'onRecord') return;
+        const cb = node.arguments[0];
+        if (!cb || (cb.type !== 'FunctionExpression' && cb.type !== 'ArrowFunctionExpression')) return;
+        const p0 = cb.params && cb.params[0];
+        if (p0 && p0.type === 'Identifier') paramVars.add(p0.name);
+      },
+    });
+    if (!paramVars.size) return rowVars;
+
+    walkLib.simple(ast, {
+      VariableDeclarator(node) {
+        if (node.id.type === 'Identifier' && node.init) {
+          const base = unwrapToIdentifierBase(node.init);
+          if (base && paramVars.has(base)) paramVars.add(node.id.name);
+        }
+      },
+      AssignmentExpression(node) {
+        if (node.left.type === 'Identifier' && node.operator === '=') {
+          const base = unwrapToIdentifierBase(node.right);
+          if (base && paramVars.has(base)) paramVars.add(node.left.name);
+        }
+      },
+    });
+
+    paramVars.forEach(param => {
+      walkLib.simple(ast, {
+        ForOfStatement(node) {
+          if (unwrapToIdentifierBase(node.right) !== param) return;
+          if (node.left.type === 'VariableDeclaration') {
+            const decl = node.left.declarations[0];
+            if (decl && decl.id.type === 'Identifier') rowVars.add(decl.id.name);
+          } else if (node.left.type === 'Identifier') {
+            rowVars.add(node.left.name);
+          }
+        },
+        CallExpression(node) {
+          const callee = node.callee;
+          if (callee.type !== 'MemberExpression') return;
+          if (unwrapToIdentifierBase(callee.object) !== param) return;
+          const methodName = callee.property && callee.property.name;
+          if (!['map', 'forEach', 'filter', 'find', 'some', 'every'].includes(methodName)) return;
+          const cb = node.arguments[0];
+          if (!cb || (cb.type !== 'FunctionExpression' && cb.type !== 'ArrowFunctionExpression')) return;
+          const p0 = cb.params && cb.params[0];
+          if (p0 && p0.type === 'Identifier') rowVars.add(p0.name);
+        },
+      });
+      rowVars.add(param);
+    });
+
+    return rowVars;
+  }
+
+  // tableId -> { columns: Set<string>, varNames: Set<string> }
+  const tablesFound = new Map();
+  function getOrCreateTable(tableId) {
+    if (!tablesFound.has(tableId)) tablesFound.set(tableId, { columns: new Set(), varNames: new Set() });
+    return tablesFound.get(tableId);
+  }
+
+  const codeBlocks = extractJsBlocksFromSource(inputSource);
+  if (!codeBlocks.length) return [];
+
+  const { acornLib, walkLib } = resolveAcorn();
+
+  for (const code of codeBlocks) {
+    if (!code || !code.trim()) continue;
+
+    let ast = null;
+    if (acornLib && walkLib) {
+      try {
+        ast = acornLib.parse(code, {
+          ecmaVersion: 2022, sourceType: 'script',
+          allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true,
+          allowImportExportEverywhere: true, allowHashBang: true,
+        });
+      } catch (e) {
+        ast = null; // fragment non parsable tel quel (bout de HTML, JS invalide…) : on l'ignore
+      }
+    }
+
+    if (ast && walkLib) {
+      // 1. Variables assignées depuis grist.docApi.fetchTable("Table") (avec ou sans "await",
+      //    déclaration ou simple affectation).
+      walkLib.ancestor(ast, {
+        CallExpression(node, state, ancestors) {
+          const callee = node.callee;
+          if (callee.type !== 'MemberExpression') return;
+          const prop = callee.property;
+          if (!prop || prop.type !== 'Identifier' || prop.name !== 'fetchTable') return;
+          const arg = node.arguments[0];
+          if (!arg || arg.type !== 'Literal' || typeof arg.value !== 'string') return;
+
+          const table = getOrCreateTable(arg.value);
+
+          for (let i = ancestors.length - 2; i >= 0; i--) {
+            const anc = ancestors[i];
+            if (anc.type === 'VariableDeclarator' && anc.id.type === 'Identifier') {
+              table.varNames.add(anc.id.name);
+              break;
+            }
+            if (anc.type === 'AssignmentExpression' && anc.left.type === 'Identifier') {
+              table.varNames.add(anc.left.name);
+              break;
+            }
+            if (anc.type !== 'AwaitExpression' && anc.type !== 'CallExpression') break;
+          }
+        },
+      });
+
+      // 2. Cas grist.onRecords(...)/grist.onRecord(...) : table déduite du tableRef du widget.
+      if (linkedTableId) {
+        const rowVars = extractOnRecordsRowVarsFromAst(ast, walkLib);
+        if (rowVars.size) {
+          const table = getOrCreateTable(linkedTableId);
+          rowVars.forEach(v => table.varNames.add(v));
+        }
+      }
+
+      if (!tablesFound.size) continue;
+
+      // 3. Accès aux colonnes : varName.Col / varName['Col'] / varName["Col"], pour toute variable
+      //    repérée ci-dessus, en excluant les propriétés JS/DOM usuelles.
+      const varNameToTableIds = new Map();
+      tablesFound.forEach((t, tableId) => {
+        t.varNames.forEach(v => {
+          if (!varNameToTableIds.has(v)) varNameToTableIds.set(v, []);
+          varNameToTableIds.get(v).push(tableId);
+        });
+      });
+
+      if (varNameToTableIds.size) {
+        walkLib.simple(ast, {
+          MemberExpression(node) {
+            const obj = node.object;
+            if (obj.type !== 'Identifier' || !varNameToTableIds.has(obj.name)) return;
+            let propName = null;
+            if (!node.computed && node.property.type === 'Identifier') {
+              propName = node.property.name;
+            } else if (node.computed && node.property.type === 'Literal' && typeof node.property.value === 'string') {
+              propName = node.property.value;
+            }
+            if (!propName || JS_BUILTIN_PROPS.has(propName)) return;
+            varNameToTableIds.get(obj.name).forEach(tid => getOrCreateTable(tid).columns.add(propName));
+          },
+        });
+      }
+    } else {
+      // --- Repli sans Acorn (bibliothèque indisponible / bloquée) : équivalent par expressions
+      // régulières, moins précis mais fonctionnel.
+      const assignRe = /(?:(?:let|const|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:await\s+)?grist\.docApi\.fetchTable\s*\(\s*(['"`])([^'"`]+)\2\s*\)/g;
+      let m;
+      const localVarToTable = [];
+      while ((m = assignRe.exec(code))) {
+        getOrCreateTable(m[3]).varNames.add(m[1]);
+        localVarToTable.push({ varName: m[1], tableId: m[3] });
+      }
+      const bareRe = /fetchTable\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g;
+      while ((m = bareRe.exec(code))) getOrCreateTable(m[2]);
+
+      if (linkedTableId) {
+        const rowVars = extractOnRecordsRowVars(code); // fonction regex déjà définie plus haut
+        if (rowVars.size) rowVars.forEach(v => getOrCreateTable(linkedTableId).varNames.add(v));
+      }
+
+      tablesFound.forEach((table, tableId) => {
+        table.varNames.forEach(varName => {
+          const escVar = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const dotRe = new RegExp(escVar + '\\s*\\.\\s*([A-Za-z_$][A-Za-z0-9_$]*)', 'g');
+          let mm;
+          while ((mm = dotRe.exec(code))) {
+            if (!JS_BUILTIN_PROPS.has(mm[1])) table.columns.add(mm[1]);
+          }
+          const bracketRe = new RegExp(escVar + '\\s*\\[\\s*[\'"`]([^\'"`]+)[\'"`]\\s*\\]', 'g');
+          while ((mm = bracketRe.exec(code))) {
+            if (!JS_BUILTIN_PROPS.has(mm[1])) table.columns.add(mm[1]);
+          }
+        });
+      });
+    }
+  }
+
+  return [...tablesFound.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([tableId, t]) => ({ tableId, known: true, columns: [...t.columns].sort() }));
 }
 
 function renderBuilderWidgets(widgets, totalCustomSections) {
@@ -2112,11 +2317,11 @@ function renderBuilderWidgets(widgets, totalCustomSections) {
         const colsHtml = t.columns.length
           ? '<div class="chips" style="margin:4px 0 10px;">' +
             t.columns.map(c => '<span class="chip">' + escapeHtml(c) + '</span>').join('') + '</div>'
-          : '<div class="empty" style="padding:2px 0 10px; text-align:left;">Aucune colonne identifiée.</div>';
+          : '<div class="empty" style="padding:2px 0 10px; text-align:left;">Aucune colonne n\'a pu être identifiée dans le code. Cela ne veut pas dire qu\'aucune colonne n\'est utilisée !</div>';
         return '<div>' + badge + colsHtml + '</div>';
       }).join('');
     }
-
+//coucou
     return '<div class="card">' +
       '<h3>' + kindBadge + escapeHtml(w.title) + '</h3>' +
       '<div class="meta">Page : ' + escapeHtml(w.page) +
@@ -2155,13 +2360,13 @@ async function loadAll() {
     const fields = toRecords(fieldsRaw);
     const views = toRecords(viewsRaw);
     const pages = toRecords(pagesRaw);
-
+/*
     console.log("tables", tables)
     console.log("columns", columns)
     console.log("sections", sections)
     console.log("fields", fields)
     console.log("views", views)
-    console.log("pages", pages)
+    console.log("pages", pages)*/
 
     lastDbml = buildDbml(tables, columns);
     document.getElementById('dbml').textContent = lastDbml;
@@ -2187,6 +2392,7 @@ async function loadAll() {
       document.getElementById('builderList').innerHTML =
         '<div class="empty">Analyse du code des widgets (builder + URL)… (' + done + ' / ' + total + ')</div>';
     });
+    //console.log("builderWidgets", builderWidgets)
     renderBuilderWidgets(builderWidgets, totalCustomSections);
 
     setStatus('');
@@ -2535,7 +2741,6 @@ function toggleHelpDiagram() {
 function toggleHelpUsage() {
             const el = document.getElementById('help-usage');
             el.classList.toggle('hidden');
-            console.log("coucou2")
         }
 
 // =====================================================================
