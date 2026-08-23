@@ -79,7 +79,7 @@
   .version-bar button { font-size: 12.5px; padding: 4px 9px; }
   .empty { color: var(--muted); padding: 20px; text-align: center; }
   .card {
-    border: 1px solid var(--border) ; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: #fff; 
+    border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: #fff;
   }
   .card h3 { margin: 0 0 6px; font-size: 13.5px; }
   .card .meta { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
@@ -348,7 +348,9 @@
     <div id="panel-builder" style="display:none;">
        
       <div class="status" style="margin-bottom:12px;">
-        <i>Cet onglet tente de télécharger le code source de chaque widget — qu'il soit écrit dans le « Custom widget builder » ou ajouté via une URL externe — pour y détecter les tables et colonnes utilisées ; seule l'URL du widget elle-même est téléchargée (pas les scripts tiers qu'elle charge, ex. dépendances ou CDN), et cela échoue silencieusement si le site qui héberge le widget bloque les requêtes inter-domaines (CORS).</i><br/><br/>
+        <i>Cet onglet tente de télécharger le code source de chaque widget — qu'il soit écrit dans le « Custom widget builder » ou
+    ajouté via une URL externe — pour y détecter les tables et colonnes utilisées ; seule l'URL du widget elle-même est téléchargée (pas les scripts tiers qu'elle charge, ex. dépendances ou CDN), et cela échoue
+    silencieusement si le site qui héberge le widget bloque les requêtes inter-domaines (CORS).</i><br/>
         Sont listées toutes les vues qui utilisent un widget personnalisé « code », de deux types :
         <span class="kind-badge builder">🧱 Builder</span> les widgets écrits dans le
         <strong>« Custom widget builder »</strong> intégré (<code class="inline">widgetDef.name === "Custom widget builder"</code>,
@@ -357,8 +359,6 @@
         (<code class="inline">customView.mode === "url"</code>) : dans ce cas le code source est téléchargé depuis
         <code class="inline">customView.url</code> et analysé à distance. Dans les deux cas, on y repère les appels à
         <code class="inline">grist.docApi.fetchTable(...)</code> et les colonnes utilisées.
-        <br/><br/>
-        <b>Le système tente de détecter les colonnes utilisées mais les possibilités de codage étant multiples, il n'y a pas de garantie de lister toutes les colonnes utilisées !</b>
       </div>
       <div id="builderList"><div class="empty">Chargement…</div></div>
     </div>
@@ -1661,6 +1661,61 @@ async function fetchTextSafe(url) {
   }
 }
 
+// ---------- Fil d'ariane des pages (réutilisé par "Vues du document" et "Custom widgets") ----------
+// Reconstruit le même arbre parent → enfants que l'onglet "🗺️ Pages ↔ Données" (basé sur _grist_Pages :
+// viewRef, indentation, pagePos), et renvoie une Map viewId -> { name, parentViewId }.
+function buildPageHierarchyMap(views, pages) {
+  const viewById = {};
+  views.forEach(v => { viewById[v.id] = v; });
+
+  const pageRows = (Array.isArray(pages) ? pages : [])
+    .filter(p => p && viewById[p.viewRef])
+    .slice()
+    .sort((a, b) => (Number(a.pagePos) || 0) - (Number(b.pagePos) || 0));
+
+  const hierarchy = new Map();
+  const stack = [];
+  pageRows.forEach(p => {
+    const depth = Math.max(0, Math.round(Number(p.indentation) || 0));
+    while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop();
+    const parentViewId = stack.length ? stack[stack.length - 1].viewId : null;
+    hierarchy.set(p.viewRef, { name: viewById[p.viewRef].name, parentViewId });
+    stack.push({ viewId: p.viewRef, depth });
+  });
+
+  // Filet de sécurité : une vue absente de _grist_Pages est quand même incluse, sans parent.
+  Object.keys(viewById).forEach(vidStr => {
+    const vid = Number(vidStr);
+    if (!hierarchy.has(vid)) hierarchy.set(vid, { name: viewById[vid].name, parentViewId: null });
+  });
+
+  return hierarchy;
+}
+
+// Liste les noms des pages parentes (de la racine jusqu'au parent direct) d'une page donnée.
+function getPageAncestorNames(viewId, hierarchy) {
+  const names = [];
+  const seen = new Set();
+  let current = hierarchy.get(viewId);
+  while (current && current.parentViewId != null && !seen.has(current.parentViewId)) {
+    seen.add(current.parentViewId);
+    const parent = hierarchy.get(current.parentViewId);
+    if (!parent) break;
+    names.unshift(parent.name);
+    current = parent;
+  }
+  return names;
+}
+
+// Nom de la page précédé du fil d'ariane de ses pages parentes (ex. "Parent › Sous-page › Page"),
+// pour donner le même contexte de hiérarchie que l'onglet "🗺️ Pages ↔ Données".
+function formatPageWithBreadcrumb(viewId, hierarchy, fallbackName) {
+  const entry = hierarchy.get(viewId);
+  const ownName = entry ? entry.name : fallbackName;
+  const ancestors = getPageAncestorNames(viewId, hierarchy);
+  return ancestors.length ? ancestors.join(' › ') + ' › ' + ownName : ownName;
+}
+
 // Récupère uniquement le texte de l'URL du widget elle-même (HTML ou JS selon ce que sert cette URL).
 // On ne suit volontairement pas les <script src="..."> qu'elle référence : ce sont potentiellement des
 // scripts tiers (CDN, dépendances) hors du contrôle de l'auteur du widget, et les télécharger ferait des
@@ -1669,14 +1724,16 @@ async function fetchWidgetSource(url) {
   return await fetchTextSafe(url);
 }
 
+// Analyse statique (heuristique) du code source d'un widget. Voir extractTableUsageFromCode ci-dessous
 // pour le détail : recherche des appels grist.docApi.fetchTable(...) et grist.onRecords(...).
 
-async function buildWidgetsList(sections, sectionFields, columns, tables, views, onProgress) {
+async function buildWidgetsList(sections, sectionFields, columns, tables, views, pages, onProgress) {
   const tableById = {};
   tables.forEach(t => { tableById[t.id] = t.tableId; });
 
   const viewById = {};
   views.forEach(v => { viewById[v.id] = v.name; });
+  const pageHierarchy = buildPageHierarchyMap(views, pages);
 
   const columnById = {};
   columns.forEach(c => { columnById[c.id] = c; });
@@ -1743,7 +1800,7 @@ async function buildWidgetsList(sections, sectionFields, columns, tables, views,
     return {
       id: s.id,
       title: s.title || '(sans titre)',
-      page: viewById[s.parentId] || '(page inconnue)',
+      page: formatPageWithBreadcrumb(s.parentId, pageHierarchy, viewById[s.parentId] || '(page inconnue)'),
       table: tableById[s.tableRef] || null,
       fieldColumns: fieldCols,
       widgetUrl: widgetUrlOrId,
@@ -1777,7 +1834,7 @@ function renderWidgets(widgets) {
           (m.resolved.length ? escapeHtml(m.resolved.join(', ')) : '<em>non liée</em>') + '</span>'
         ).join('') + '</div>';
     }
-    
+
     // Liste brute des options du widget
     let optionsHtml = '';
     if (w.optionsList.length) {
@@ -1901,6 +1958,73 @@ function extractOnRecordsRowVars(code) {
   return rowVars;
 }
 
+// Analyse le code : repère les variables assignées via grist.docApi.fetchTable("Table"),
+// puis cherche dans le code les accès varName.colId ou varName['colId'] pour chaque colonne
+// connue de cette table. Retombe sur une recherche par mot entier si aucune variable n'est repérable.
+// `linkedTableId` (optionnel) est le tableId de la table à laquelle le widget est relié (tableRef de la
+// section) : utilisé pour rattacher les accès trouvés via grist.onRecords(...), qui ne nomme jamais la
+// table explicitement dans le code.
+function extractTableUsageFromCode(code, tables, columnsByTableRef, linkedTableId) {
+  if (!code) return [];
+  const tableByTableId = {};
+  tables.forEach(t => { tableByTableId[t.tableId] = t; });
+
+  const assignRe = /(?:(?:let|const|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:await\s+)?grist\.docApi\.fetchTable\s*\(\s*(['"`])([^'"`]+)\2\s*\)/g;
+  const varToTable = [];
+  let m;
+  while ((m = assignRe.exec(code))) {
+    varToTable.push({ varName: m[1], tableId: m[3] });
+  }
+
+  const bareRe = /fetchTable\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g;
+  const tableIds = new Set(varToTable.map(v => v.tableId));
+  while ((m = bareRe.exec(code))) tableIds.add(m[2]);
+
+  // Cas grist.onRecords(...) : la table n'est pas nommée dans le code, elle vient du tableRef du widget.
+  if (linkedTableId && tableByTableId[linkedTableId]) {
+    const onRecordsRowVars = extractOnRecordsRowVars(code);
+    if (onRecordsRowVars.size) {
+      tableIds.add(linkedTableId);
+      onRecordsRowVars.forEach(varName => varToTable.push({ varName, tableId: linkedTableId }));
+    }
+  }
+
+  return [...tableIds].sort().map(tableId => {
+    const t = tableByTableId[tableId];
+    if (!t) return { tableId, known: false, columns: [] };
+
+    const knownCols = (columnsByTableRef[t.id] || [])
+      .filter(c => c.colId !== 'manualSort' && !String(c.colId).startsWith('gristHelper_'))
+      .map(c => c.colId);
+    const varNames = varToTable.filter(v => v.tableId === tableId).map(v => v.varName);
+    const usedCols = new Set();
+
+    const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    if (varNames.length) {
+      varNames.forEach(varName => {
+        const escVar = escapeRe(varName);
+        knownCols.forEach(colId => {
+          const escCol = escapeRe(colId);
+          const re = new RegExp(
+            escVar + '\\s*(?:\\.\\s*' + escCol + '\\b|\\[\\s*[\'"`]' + escCol + '[\'"`]\\s*\\])'
+          );
+          if (re.test(code)) usedCols.add(colId);
+        });
+      });
+    } else {
+      // Pas de variable clairement identifiée (appel en chaîne, destructuration…) :
+      // repli sur une recherche du nom de colonne comme mot entier dans tout le code.
+      knownCols.forEach(colId => {
+        const escCol = escapeRe(colId);
+        const wordRe = new RegExp('(?<![A-Za-z0-9_$])' + escCol + '(?![A-Za-z0-9_$])');
+        if (wordRe.test(code)) usedCols.add(colId);
+      });
+    }
+
+    return { tableId, known: true, columns: [...usedCols] };
+  });
+}
 
 // Classe une section "custom" selon la manière dont son code est disponible :
 // - 'builder' : écrit dans le Custom widget builder intégré (code dans customView.widgetOptions)
@@ -1923,9 +2047,10 @@ function classifyCustomSection(options) {
   return null;
 }
 
-async function buildBuilderWidgetsList(sections, tables, columns, views, onProgress) {
+async function buildBuilderWidgetsList(sections, tables, columns, views, pages, onProgress) {
   const viewById = {};
   views.forEach(v => { viewById[v.id] = v.name; });
+  const pageHierarchy = buildPageHierarchyMap(views, pages);
   const tableById = {};
   tables.forEach(t => { tableById[t.id] = t.tableId; });
   const columnsByTableRef = {};
@@ -1950,13 +2075,15 @@ async function buildBuilderWidgetsList(sections, tables, columns, views, onProgr
     const base = {
       id: s.id,
       title: s.title || '(sans titre)',
-      page: viewById[s.parentId] || '(page inconnue)',
+      page: formatPageWithBreadcrumb(s.parentId, pageHierarchy, viewById[s.parentId] || '(page inconnue)'),
       table: tableById[s.tableRef] || null,
     };
 
     if (classification.kind === 'builder') {
       const code = getWidgetBuilderCode(classification.customView);
       if (!code) return finish(null);
+      //console.log("code", code)
+      //const tablesUsed = extractTableUsageFromCode(code, tables, columnsByTableRef, base.table);
       const tablesUsed = extractGristTablesAndColumns(code, base.table)
       //console.log("tablesUsed", tablesUsed)
       return finish({ ...base, kind: 'builder', hasCode: true, tablesUsed });
@@ -1968,6 +2095,8 @@ async function buildBuilderWidgetsList(sections, tables, columns, views, onProgr
     if (source == null) {
       return finish({ ...base, kind: 'url', url, fetchFailed: true, tablesUsed: [] });
     }
+    //const tablesUsed = extractTableUsageFromCode(source, tables, columnsByTableRef, base.table);
+    //console.log("source", source)
     const tablesUsed = extractGristTablesAndColumns(source, base.table)
     //console.log("tablesUsed", tablesUsed)
     return finish({ ...base, kind: 'url', url, fetchFailed: false, tablesUsed });
@@ -2317,7 +2446,7 @@ function renderBuilderWidgets(widgets, totalCustomSections) {
         const colsHtml = t.columns.length
           ? '<div class="chips" style="margin:4px 0 10px;">' +
             t.columns.map(c => '<span class="chip">' + escapeHtml(c) + '</span>').join('') + '</div>'
-          : '<div class="empty" style="padding:2px 0 10px; text-align:left;">Aucune colonne n\'a pu être identifiée dans le code. Cela ne veut pas dire qu\'aucune colonne n\'est utilisée !</div>';
+          : '<div class="empty" style="padding:2px 0 10px; text-align:left;">Aucune colonne identifiée.</div>';
         return '<div>' + badge + colsHtml + '</div>';
       }).join('');
     }
@@ -2360,8 +2489,8 @@ async function loadAll() {
     const fields = toRecords(fieldsRaw);
     const views = toRecords(viewsRaw);
     const pages = toRecords(pagesRaw);
-/*
-    console.log("tables", tables)
+
+    /*console.log("tables", tables)
     console.log("columns", columns)
     console.log("sections", sections)
     console.log("fields", fields)
@@ -2381,14 +2510,14 @@ async function loadAll() {
       requestAnimationFrame(() => window.__usageFit());
     }
 
-    const widgets = await buildWidgetsList(sections, fields, columns, tables, views, (done, total) => {
+    const widgets = await buildWidgetsList(sections, fields, columns, tables, views, pages, (done, total) => {
       document.getElementById('widgetsList').innerHTML =
         '<div class="empty">Analyse du code des widgets… (' + done + ' / ' + total + ')</div>';
     });
     renderWidgets(widgets);
 
     const totalCustomSections = sections.filter(s => s.parentKey === 'custom').length;
-    const builderWidgets = await buildBuilderWidgetsList(sections, tables, columns, views, (done, total) => {
+    const builderWidgets = await buildBuilderWidgetsList(sections, tables, columns, views, pages, (done, total) => {
       document.getElementById('builderList').innerHTML =
         '<div class="empty">Analyse du code des widgets (builder + URL)… (' + done + ' / ' + total + ')</div>';
     });
