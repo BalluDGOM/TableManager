@@ -271,6 +271,10 @@
             <input type="checkbox" id="chkShowUnlinkedColumns" checked>
             Afficher les colonnes sans lien avec une autre table
           </label>
+          <label class="toolbar-check">
+            <input type="checkbox" id="chkHideSummaryTables">
+            Cacher les tables de regroupement (*_summary_*)
+          </label>
         </div>
         <div class="version-bar">
           <span class="version-bar-label">📁 Vue :</span>
@@ -757,7 +761,14 @@ let diagramTables = [];   // dernières données chargées, pour pouvoir re-rend
 let diagramColumns = [];
 let saveStateTimer = null;
 let showUnlinkedColumns = true; // false = ne montrer que la clé primaire et les colonnes Ref/RefList
+let hideSummaryTables = false; // true = masquer toutes les tables de regroupement (*_summary_*)
 const viewState = { scale: 1 }; // échelle courante du canevas, lue par le glisser-déposer des tables
+
+// Repère les tables de regroupement générées par Grist (tables "summary"), reconnaissables à
+// "_summary_" dans leur tableId (ex. Table1_summary_Colonne).
+function isSummaryTable(tableId) {
+  return typeof tableId === 'string' && tableId.includes('_summary_');
+}
 
 // Vues nommées ("métier", "support", "administration"...) : chacune capture un instantané de
 // (tables masquées, positions, affichage des colonnes non liées). Le "brouillon" courant ci-dessus
@@ -784,6 +795,7 @@ async function loadDiagramState() {
       hiddenTableIds = new Set(Array.isArray(saved.hidden) ? saved.hidden : []);
       manualPositions = (saved.positions && typeof saved.positions === 'object') ? saved.positions : {};
       showUnlinkedColumns = saved.showUnlinkedColumns !== false;
+      hideSummaryTables = saved.hideSummaryTables === true;
       diagramVersions = (saved.versions && typeof saved.versions === 'object') ? saved.versions : {};
       diagramActiveVersionName = typeof saved.activeVersion === 'string' ? saved.activeVersion : null;
     }
@@ -800,6 +812,7 @@ function saveDiagramState() {
         hidden: [...hiddenTableIds],
         positions: manualPositions,
         showUnlinkedColumns,
+        hideSummaryTables,
         versions: diagramVersions,
         activeVersion: diagramActiveVersionName,
       });
@@ -815,6 +828,7 @@ function currentDiagramSnapshot() {
     hidden: [...hiddenTableIds],
     positions: JSON.parse(JSON.stringify(manualPositions)),
     showUnlinkedColumns,
+    hideSummaryTables,
   };
 }
 
@@ -824,6 +838,7 @@ function applyDiagramSnapshot(snap) {
   manualPositions = (snap.positions && typeof snap.positions === 'object')
     ? JSON.parse(JSON.stringify(snap.positions)) : {};
   showUnlinkedColumns = snap.showUnlinkedColumns !== false;
+  hideSummaryTables = snap.hideSummaryTables === true;
 }
 
 function populateDiagramVersionSelect() {
@@ -892,6 +907,34 @@ function populateUsageVersionSelect() {
 function measureTextWidth(text, fontSize) {
   // Approximation monospace : suffisant pour dimensionner les boîtes sans devoir mesurer le DOM.
   return text.length * fontSize * 0.62;
+}
+
+// Découpe un texte (ex. titre de page ou nom de table) en lignes d'au plus `maxChars` caractères,
+// en coupant de préférence entre les mots ; un mot lui-même plus long que `maxChars` est coupé net.
+function wrapTitleText(text, maxChars = 75) {
+  const str = String(text == null ? '' : text).trim();
+  if (!str) return [''];
+  const words = str.split(/\s+/);
+  const lines = [];
+  let current = '';
+  words.forEach(rawWord => {
+    let word = rawWord;
+    while (word.length > maxChars) {
+      if (current) { lines.push(current); current = ''; }
+      lines.push(word.slice(0, maxChars));
+      word = word.slice(maxChars);
+    }
+    if (!current) {
+      current = word;
+    } else if ((current + ' ' + word).length <= maxChars) {
+      current += ' ' + word;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  });
+  if (current) lines.push(current);
+  return lines.length ? lines : [''];
 }
 
 function buildDiagramModel(tables, columns) {
@@ -967,9 +1010,11 @@ function buildDiagramModel(tables, columns) {
     });
   }
 
-  const visibleBoxes = boxes.filter(b => !hiddenTableIds.has(b.tableId));
+  const isEffectivelyHidden = (tableId) => hiddenTableIds.has(tableId) || (hideSummaryTables && isSummaryTable(tableId));
+
+  const visibleBoxes = boxes.filter(b => !isEffectivelyHidden(b.tableId));
   const visibleRelations = relations.filter(
-    r => !hiddenTableIds.has(r.fromBox.tableId) && !hiddenTableIds.has(r.toBox.tableId)
+    r => !isEffectivelyHidden(r.fromBox.tableId) && !isEffectivelyHidden(r.toBox.tableId)
   );
 
   const hiddenCount = boxes.length - visibleBoxes.length;
@@ -1286,8 +1331,8 @@ const TYPE_LABELS = {
 };
 
 function buildUsageModel(sections, views, tables, pages) {
-  const HEADER_H = 28, ROW_H = 19, PAD_X = 10, PAGE_MIN_W = 200, PAGE_MAX_W = 300;
-  const TABLE_MIN_W = 150, TABLE_MAX_W = 240;
+  const HEADER_H = 28, ROW_H = 19, PAD_X = 10, PAGE_MIN_W = 220, PAGE_MAX_W = 520;
+  const TABLE_MIN_W = 170, TABLE_MAX_W = 460;
   const INDENT_STEP = 22;
 
   const viewById = {};
@@ -1335,25 +1380,32 @@ function buildUsageModel(sections, views, tables, pages) {
       label: (TYPE_LABELS[s.parentKey] || ('▫ ' + (s.parentKey || '?'))) + '  ' + (s.title || '(sans titre)'),
       tableRef: s.tableRef || null,
     }));
+    const title = (view && view.name) || '(page sans nom)';
+    const titleLines = wrapTitleText(title);
+    const headerH = HEADER_H + Math.max(0, titleLines.length - 1) * 15;
     let width = PAGE_MIN_W;
     rows.forEach(r => { width = Math.max(width, measureTextWidth(r.label, 11.5) + PAD_X * 2 + 10); });
+    titleLines.forEach(line => { width = Math.max(width, measureTextWidth('📄 ' + line, 12.5) + PAD_X * 2 + 50); });
     width = Math.min(width, PAGE_MAX_W);
     const rowCount = Math.max(rows.length, 1);
-    const height = HEADER_H + rowCount * ROW_H + 6;
+    const height = headerH + rowCount * ROW_H + 6;
     const itemId = 'page:' + pid;
     const parentItemId = meta.parentViewId != null ? 'page:' + meta.parentViewId : null;
     return {
       itemId, pageId: pid, parentItemId, depth: meta.depth,
-      title: (view && view.name) || '(page sans nom)', rows, width, height,
+      title, titleLines, headerH, rows, width, height,
     };
   });
 
   const allTableBoxes = tables.slice().sort((a, b) => a.tableId.localeCompare(b.tableId)).map(t => {
-    let width = Math.max(TABLE_MIN_W, measureTextWidth(t.tableId, 12.5) + PAD_X * 2 + 16);
+    const titleLines = wrapTitleText(t.tableId);
+    const headerH = HEADER_H + Math.max(0, titleLines.length - 1) * 15;
+    let width = TABLE_MIN_W;
+    titleLines.forEach(line => { width = Math.max(width, measureTextWidth('🗄 ' + line, 12.5) + PAD_X * 2 + 50); });
     width = Math.min(width, TABLE_MAX_W);
-    const height = HEADER_H + ROW_H + 6;
+    const height = headerH + ROW_H + 6;
     const itemId = 'table:' + t.tableId;
-    return { itemId, tableId: t.tableId, tableRef: t.id, width, height };
+    return { itemId, tableId: t.tableId, tableRef: t.id, titleLines, headerH, width, height };
   });
 
   const GAP_Y = 24, MARGIN = 30, COL_GAP = 220, TABLE_GAP_Y = 16;
@@ -1428,15 +1480,15 @@ function computeTreeLinkPathD(link) {
   const x1 = link.parent.x + 14;
   const y1 = link.parent.y + link.parent.height;
   const x2 = link.child.x;
-  const y2 = link.child.y + 14;
+  const y2 = link.child.y + link.child.headerH / 2;
   const midY = (y1 + y2) / 2;
   return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
 }
 
 function computeUsageLinkPathD(link, model) {
-  const y1 = link.fromBox.y + model.HEADER_H + link.fromRowIndex * model.ROW_H + model.ROW_H / 2;
+  const y1 = link.fromBox.y + link.fromBox.headerH + link.fromRowIndex * model.ROW_H + model.ROW_H / 2;
   const x1 = link.fromBox.x + link.fromBox.width;
-  const y2 = link.toBox.y + model.HEADER_H / 2;
+  const y2 = link.toBox.y + link.toBox.headerH / 2;
   const x2 = link.toBox.x;
   const dx = Math.max((x2 - x1) / 2, 40);
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
@@ -1542,7 +1594,7 @@ function renderUsageSvg(model) {
   });
 
   function addHideButton(g, box, width) {
-    const hideBtn = svgEl('g', { class: 'dg-hide-btn', transform: `translate(${width - 16},${14})` }, g);
+    const hideBtn = svgEl('g', { class: 'dg-hide-btn', transform: `translate(${width - 16},${box.headerH / 2})` }, g);
     svgEl('circle', { r: 9, fill: 'rgba(255,255,255,0.18)' }, hideBtn);
     svgEl('text', { x: 0, y: 4, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': 12, 'font-weight': 700 }, hideBtn)
       .textContent = '✕';
@@ -1556,22 +1608,46 @@ function renderUsageSvg(model) {
     });
   }
 
+  // Bouton "isoler" : ne conserver que cet item et les éléments qui y sont directement liés
+  // (widget ↔ table source), en masquant tout le reste. Placé juste à gauche du bouton de masquage.
+  function addIsolateButton(g, box, width) {
+    const isoBtn = svgEl('g', { class: 'dg-hide-btn', transform: `translate(${width - 36},${box.headerH / 2})` }, g);
+    svgEl('circle', { r: 9, fill: 'rgba(255,255,255,0.18)' }, isoBtn);
+    const isoLabel = svgEl('text', {
+      x: 0, y: 4, 'text-anchor': 'middle', fill: '#ffffff', 'font-size': 11, 'font-weight': 700,
+    }, isoBtn);
+    isoLabel.textContent = '◎';
+    svgEl('title', {}, isoBtn).textContent = 'Isoler : ne garder que cet élément et ses liens';
+    isoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    isoBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      isolateUsageItem(box.itemId);
+    });
+  }
+
   // Boîtes de pages (colonne de gauche)
   model.pageBoxes.forEach(b => {
     const g = svgEl('g', { class: 'dg-table-box', transform: `translate(${b.x},${b.y})` }, root);
     svgEl('rect', { class: 'dg-body', x: 0, y: 0, width: b.width, height: b.height, rx: 6 }, g);
-    svgEl('rect', { class: 'dg-header', x: 0, y: 0, width: b.width, height: model.HEADER_H, rx: 6 }, g);
-    svgEl('rect', { x: 0, y: model.HEADER_H - 6, width: b.width, height: 6, fill: 'var(--accent)' }, g);
-    svgEl('text', { class: 'dg-title', x: model.PAD_X, y: model.HEADER_H / 2 + 4 }, g).textContent = '📄 ' + b.title;
+    svgEl('rect', { class: 'dg-header', x: 0, y: 0, width: b.width, height: b.headerH, rx: 6 }, g);
+    svgEl('rect', { x: 0, y: b.headerH - 6, width: b.width, height: 6, fill: 'var(--accent)' }, g);
+    const titleLines = b.titleLines && b.titleLines.length ? b.titleLines : [b.title];
+    const lineH = 15;
+    const startY = b.headerH / 2 - ((titleLines.length - 1) * lineH) / 2 + 4;
+    titleLines.forEach((line, i) => {
+      svgEl('text', { class: 'dg-title', x: model.PAD_X, y: startY + i * lineH }, g).textContent =
+        (i === 0 ? '📄 ' : '') + line;
+    });
     if (b.rows.length) {
       b.rows.forEach((r, i) => {
-        const y = model.HEADER_H + i * model.ROW_H;
+        const y = b.headerH + i * model.ROW_H;
         svgEl('text', { class: 'dg-col', x: model.PAD_X, y: y + model.ROW_H / 2 + 4 }, g).textContent = r.label;
       });
     } else {
-      svgEl('text', { class: 'dg-col dg-col-type', x: model.PAD_X, y: model.HEADER_H + model.ROW_H / 2 + 4 }, g)
+      svgEl('text', { class: 'dg-col dg-col-type', x: model.PAD_X, y: b.headerH + model.ROW_H / 2 + 4 }, g)
         .textContent = '(aucun widget)';
     }
+    addIsolateButton(g, b, b.width);
     addHideButton(g, b, b.width);
     attachUsageBoxDrag(g, b, model);
   });
@@ -1580,10 +1656,17 @@ function renderUsageSvg(model) {
   model.tableBoxes.forEach(b => {
     const g = svgEl('g', { class: 'dg-table-box ug-table-box', transform: `translate(${b.x},${b.y})` }, root);
     svgEl('rect', { class: 'dg-body', x: 0, y: 0, width: b.width, height: b.height, rx: 6 }, g);
-    svgEl('rect', { class: 'dg-header', x: 0, y: 0, width: b.width, height: model.HEADER_H, rx: 6 }, g);
-    svgEl('text', { class: 'dg-title', x: model.PAD_X, y: model.HEADER_H / 2 + 4 }, g).textContent = '🗄 ' + b.tableId;
-    svgEl('text', { class: 'dg-col ug-source-label', x: model.PAD_X, y: model.HEADER_H + model.ROW_H / 2 + 4 }, g)
+    svgEl('rect', { class: 'dg-header', x: 0, y: 0, width: b.width, height: b.headerH, rx: 6 }, g);
+    const titleLines = b.titleLines && b.titleLines.length ? b.titleLines : [b.tableId];
+    const lineH = 15;
+    const startY = b.headerH / 2 - ((titleLines.length - 1) * lineH) / 2 + 4;
+    titleLines.forEach((line, i) => {
+      svgEl('text', { class: 'dg-title', x: model.PAD_X, y: startY + i * lineH }, g).textContent =
+        (i === 0 ? '🗄 ' : '') + line;
+    });
+    svgEl('text', { class: 'dg-col ug-source-label', x: model.PAD_X, y: b.headerH + model.ROW_H / 2 + 4 }, g)
       .textContent = 'table source';
+    addIsolateButton(g, b, b.width);
     addHideButton(g, b, b.width);
     attachUsageBoxDrag(g, b, model);
   });
@@ -1597,6 +1680,39 @@ function renderUsage(sections, views, tables, pages) {
   const model = buildUsageModel(sections, views, tables, usagePages);
   renderUsageSvg(model);
   updateUsageHiddenBar(model);
+}
+
+// Calcule les items ("page:<id>" / "table:<tableId>") directement liés à un item donné, via les
+// widgets qui affichent une table (tableRef de la section de vue).
+function computeConnectedUsageItemIds(itemId) {
+  const connected = new Set();
+  if (itemId.startsWith('page:')) {
+    const viewId = Number(itemId.slice(5));
+    usageSections.forEach(s => {
+      if (s.parentId === viewId && s.tableRef) {
+        const t = usageTables.find(tt => tt.id === s.tableRef);
+        if (t) connected.add('table:' + t.tableId);
+      }
+    });
+  } else if (itemId.startsWith('table:')) {
+    const tableId = itemId.slice(6);
+    const t = usageTables.find(tt => tt.tableId === tableId);
+    if (t) {
+      usageSections.forEach(s => {
+        if (s.tableRef === t.id) connected.add('page:' + s.parentId);
+      });
+    }
+  }
+  return connected;
+}
+
+// Ne conserve que l'item cliqué et les éléments qui y sont directement liés ; masque tout le reste.
+function isolateUsageItem(itemId) {
+  const keep = new Set([itemId, ...computeConnectedUsageItemIds(itemId)]);
+  const allIds = usageViews.map(v => 'page:' + v.id).concat(usageTables.map(t => 'table:' + t.tableId));
+  usageHiddenIds = new Set(allIds.filter(id => !keep.has(id)));
+  saveUsageState();
+  renderUsage(usageSections, usageViews, usageTables, usagePages);
 }
 
 function updateUsageHiddenBar(model) {
@@ -2672,6 +2788,12 @@ document.getElementById('chkShowUnlinkedColumns').addEventListener('change', (e)
   renderDiagram(diagramTables, diagramColumns);
 });
 
+document.getElementById('chkHideSummaryTables').addEventListener('change', (e) => {
+  hideSummaryTables = e.target.checked;
+  saveDiagramState();
+  renderDiagram(diagramTables, diagramColumns);
+});
+
 document.getElementById('diagramVersionSelect').addEventListener('change', (e) => {
   const name = e.target.value;
   if (!name) {
@@ -2688,6 +2810,8 @@ document.getElementById('diagramVersionSelect').addEventListener('change', (e) =
   saveDiagramState();
   renderDiagram(diagramTables, diagramColumns);
   document.getElementById('btnDiagramDeleteVersion').disabled = false;
+  document.getElementById('chkShowUnlinkedColumns').checked = showUnlinkedColumns;
+  document.getElementById('chkHideSummaryTables').checked = hideSummaryTables;
   if (window.__diagramFit) requestAnimationFrame(() => window.__diagramFit());
 });
 
@@ -2846,6 +2970,7 @@ Promise.all([loadDiagramState(), loadUsageState()]).then(() => {
   // Reflète l'état persisté (chargé de manière asynchrone) sur la case à cocher et les sélecteurs de vues
   // avant le premier rendu.
   document.getElementById('chkShowUnlinkedColumns').checked = showUnlinkedColumns;
+  document.getElementById('chkHideSummaryTables').checked = hideSummaryTables;
   populateDiagramVersionSelect();
   populateUsageVersionSelect();
   loadAll();
