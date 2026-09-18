@@ -496,6 +496,9 @@
                 <h2 class="text-lg font-bold text-gray-700">Colonnes de la table</h2>
                 <div class="flex gap-2 flex-wrap justify-end">
                     
+                    <button type="button" onclick="addEmailValidationColumn()" class="bg-teal-100 hover:bg-teal-200 text-teal-700 font-medium py-1 px-3 rounded text-sm transition" title="Ajoute une colonne 'Courriel valide' (Oui/Non) qui vérifie le format d'une colonne Courriel via une expression régulière">
+                        ✉️ Courriel valide
+                    </button>
                     <button type="button" onclick="addTraceabilityColumns()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-3 rounded text-sm transition" title="Permet de mettre en place 4 colonnes CrééLe / CrééPar / ModifiéLe / ModifiéPar pour faire un suivi simple des actions">
                         ✨ Traçabilité
                     </button>
@@ -3268,6 +3271,20 @@ function toggleHelpUsage() {
                 </td>
             `;
             container.appendChild(tr);
+        }
+
+        // Formule de validation du format d'un courriel : accepte une valeur vide (pour ne pas
+        // bloquer les lignes sans courriel renseigné) et vérifie sinon la forme générale via une regex.
+        const EMAIL_VALID_FORMULA = [
+            'import re',
+            '',
+            'email = $Email or ""',
+            'pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+$"',
+            'return bool(re.match(pattern, email.strip())) or not bool(email)',
+        ].join('\n');
+
+        function addEmailValidationColumn() {
+            addColumnRow('Courriel valide', 'Bool', EMAIL_VALID_FORMULA, false, false);
         }
 
         function addTraceabilityColumns() {
